@@ -28,6 +28,10 @@ export const SUPPORTED_PARTNER_LANGS = [
 export const SUPPORTED_PREFERRED_LANGS = [
   { code: 'ru', label: 'Русский' },
   { code: 'en', label: 'English' },
+  { code: 'vi', label: 'Tiếng Việt' },
+  { code: 'ko', label: '한국어' },
+  { code: 'zh', label: '中文' },
+  { code: 'ja', label: '日本語' },
 ];
 
 function key(chatKey: string): string {
@@ -107,4 +111,20 @@ export async function migrateChatSettings(newKey: string, oldKey: string): Promi
   await setChatSettings(newKey, { ...older, display_name: older.display_name ?? oldKey });
   await deleteChatSettings(oldKey);
   return { ...older };
+}
+
+// ===== Server sync =========================================================
+// Настройки чатов хранятся как локально (chrome.storage.local), так и в D1 (зависят от
+// аккаунта пользователя). Это позволяет:
+// - не терять настройки при reinstall расширения
+// - синхронизировать между девайсами (включил VI у Phil на работе → дома уже включено)
+
+const LAST_SYNC_KEY = 'zb_chat_last_sync';
+
+export async function getLastSyncTs(): Promise<number> {
+  return (await storage.get<number>(LAST_SYNC_KEY)) ?? 0;
+}
+
+export async function setLastSyncTs(ts: number): Promise<void> {
+  await storage.set(LAST_SYNC_KEY, ts);
 }

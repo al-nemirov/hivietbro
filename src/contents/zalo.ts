@@ -3,13 +3,16 @@
 
 import type { PlasmoCSConfig } from 'plasmo';
 import { Storage } from '@plasmohq/storage';
-import { translate as apiTranslate } from '../lib/api';
+import { translate as apiTranslate, pullChatsFromServer, pushChatsToServer } from '../lib/api';
 import { getToken, isEnabled } from '../lib/storage';
 import { cacheGet, cacheSet } from '../lib/cache-client';
 import {
   getOrInitChatSettings,
+  getChatSettings,
   setChatSettings,
   migrateChatSettings,
+  getLastSyncTs,
+  setLastSyncTs,
   SUPPORTED_PARTNER_LANGS,
   type ChatSettings,
 } from '../lib/chat-settings';
@@ -68,6 +71,62 @@ async function bootstrap(): Promise<void> {
   attachOutgoingInterceptors();
   watchUI();
   console.info('[zalo-bridge] active');
+
+  // Async: подтянуть настройки чатов с сервера (в фоне, не блокируем bootstrap)
+  void syncFromServer().catch((e) => console.warn('[zalo-bridge] sync from server failed:', e));
+}
+
+// ===== LANGUAGE DETECTION ===================================================
+
+/**
+ * Определяет язык текста по символам.
+ * Покрывает русский, вьетнамский (с диакритикой и без), английский.
+ */
+const VI_DIACRITIC_RE =
+  /[ăâđêôơưĂÂĐÊÔƠƯàáảãạằắẳẵặầấẩẫậèéẻẽẹềếểễệìíỉĩịòóỏõọồốổỗộờớởỡợùúủũụừứửữựỳýỷỹỵÀÁẢÃẠẰẮẲẴẶẦẤẨẪẬÈÉẺẼẸỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌỒỐỔỖỘỜỚỞỠỢÙÚỦŨỤỪỨỬỮỰỲÝỶỸỴ]/;
+const VI_COMMON_RE =
+  /\b(không|được|là|tôi|bạn|anh|em|chị|ơi|tao|mày|gì|của|cái|này|đó|và|hay|với|cho|một|hai|ba|năm|sao|đi|làm|ngày|hôm|bao|nhiêu|rồi|còn|đã|sẽ|đang|đâu|nào|khi|thế)\b/i;
+const CYRILLIC_RE = /[Ѐ-ӿ]/;
+const HANGUL_RE = /[가-힯ᄀ-ᇿ㄰-㆏]/;
+const HIRAGANA_KATAKANA_RE = /[぀-ヿ]/;
+const CJK_RE = /[一-鿿]/;
+
+function detectLang(text: string): string {
+  const t = text.trim();
+  if (!t) return 'unknown';
+
+  let cyr = 0,
+    latin = 0,
+    han = 0,
+    kana = 0,
+    cjk = 0,
+    total = 0;
+  for (const ch of t) {
+    if (/\p{Letter}/u.test(ch)) {
+      total++;
+      if (CYRILLIC_RE.test(ch)) cyr++;
+      else if (HANGUL_RE.test(ch)) han++;
+      else if (HIRAGANA_KATAKANA_RE.test(ch)) kana++;
+      else if (CJK_RE.test(ch)) cjk++;
+      else if (/[a-zA-Z]/.test(ch)) latin++;
+    }
+  }
+  if (total === 0) return 'unknown';
+
+  // Доминирующий скрипт
+  if (cyr / total > 0.5) return 'ru';
+  if (han / total > 0.3) return 'ko';
+  if (kana / total > 0.2) return 'ja';
+  if (cjk / total > 0.5) return 'zh';
+
+  // Вьетнамский: диакритика или характерные слова
+  if (VI_DIACRITIC_RE.test(t)) return 'vi';
+  if (VI_COMMON_RE.test(t)) return 'vi';
+
+  // Латиница без VI-сигналов — английский
+  if (latin / total > 0.5) return 'en';
+
+  return 'unknown';
 }
 
 function injectStyles(): void {
@@ -430,8 +489,13 @@ async function processBubble(bubble: Element): Promise<void> {
   const text = extractText(bubble);
   if (!text) return;
 
-  const srcLang = currentChatSettings.partner_lang;
+  // Авто-детект: если входящее сообщение уже на языке пользователя — не переводим
+  const detected = detectLang(text);
   const tgtLang = currentChatSettings.preferred_lang;
+  if (detected === tgtLang) return;
+
+  // Используем определённый язык как src; если не определилось — берём конфиг чата
+  const srcLang = detected !== 'unknown' ? detected : currentChatSettings.partner_lang;
 
   const target = bubble.querySelector('.message-content-wrapper') ?? bubble;
   const overlay = document.createElement('div');
@@ -711,6 +775,7 @@ function toggleChipMenu(chip: HTMLElement): void {
     if (!currentChatKey || !currentChatSettings) return;
     currentChatSettings = { ...currentChatSettings, enabled: !currentChatSettings.enabled };
     await setChatSettings(currentChatKey, currentChatSettings);
+    void syncToServer(currentChatKey, currentChatSettings);
     const sw = menu.querySelector(`.${CHIP_CLASS}__switch`) as HTMLElement;
     sw.dataset.on = currentChatSettings.enabled ? '1' : '0';
     renderChip();
@@ -725,6 +790,7 @@ function toggleChipMenu(chip: HTMLElement): void {
       if (lang === currentChatSettings.partner_lang) return;
       currentChatSettings = { ...currentChatSettings, partner_lang: lang };
       await setChatSettings(currentChatKey, currentChatSettings);
+      void syncToServer(currentChatKey, currentChatSettings);
       menu.remove();
       renderChip();
       rescanVisibleMessages();
@@ -847,13 +913,24 @@ function attachOutgoingInterceptors(): void {
 async function interceptAndSend(input: HTMLElement, ruText: string): Promise<void> {
   if (translationInFlight) return;
   if (!currentChatSettings) return;
+
+  // Если пользователь сам уже написал на языке партнёра — не переводим, отдаём Zalo как есть
+  const detectedSrc = detectLang(ruText);
+  if (detectedSrc === currentChatSettings.partner_lang) {
+    // Откатить наше preventDefault — нативный send уже не сработает,
+    // поэтому программно симулируем нажатие send-кнопки
+    const sendBtn = document.querySelector(SEL.sendButton) as HTMLElement | null;
+    if (sendBtn) sendBtn.click();
+    return;
+  }
+
   translationInFlight = true;
   showStatus('Перевожу…');
 
   try {
     const result = await apiTranslate({
       text: ruText,
-      source_lang: currentChatSettings.preferred_lang,
+      source_lang: detectedSrc !== 'unknown' ? detectedSrc : currentChatSettings.preferred_lang,
       target_lang: currentChatSettings.partner_lang,
       direction: 'outgoing',
       chat_id: currentChatKey ?? undefined,
@@ -988,6 +1065,49 @@ function watchUI(): void {
 
   const bodyObs = new MutationObserver(schedule);
   bodyObs.observe(document.body, { childList: true, subtree: true });
+}
+
+// ===== SERVER SYNC ==========================================================
+
+async function syncFromServer(): Promise<void> {
+  const since = await getLastSyncTs();
+  const remote = await pullChatsFromServer(since);
+  if (remote.length === 0) return;
+
+  let maxTs = since;
+  for (const r of remote) {
+    if (r.updated_at > maxTs) maxTs = r.updated_at;
+    const local = await getChatSettings(r.chat_key);
+    // Last-write-wins: серверный апдейт перезаписывает локальный, если он новее
+    if (!local || r.updated_at > (local.updated_at ?? 0)) {
+      await setChatSettings(r.chat_key, {
+        enabled: r.enabled === 1 || (r.enabled as unknown) === true,
+        partner_lang: r.partner_lang,
+        preferred_lang: r.preferred_lang,
+        display_name: r.display_name ?? undefined,
+        updated_at: r.updated_at,
+      });
+    }
+  }
+  await setLastSyncTs(maxTs);
+  console.info(`[zalo-bridge] synced ${remote.length} chats from server`);
+}
+
+async function syncToServer(chatKey: string, settings: ChatSettings): Promise<void> {
+  try {
+    await pushChatsToServer([
+      {
+        chat_key: chatKey,
+        display_name: settings.display_name ?? null,
+        enabled: settings.enabled,
+        partner_lang: settings.partner_lang,
+        preferred_lang: settings.preferred_lang,
+        updated_at: settings.updated_at,
+      },
+    ]);
+  } catch (e) {
+    console.warn('[zalo-bridge] sync to server failed:', e);
+  }
 }
 
 bootstrap().catch((e) => console.error('[zalo-bridge] bootstrap failed:', e));

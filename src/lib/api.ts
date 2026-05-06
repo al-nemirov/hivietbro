@@ -52,3 +52,36 @@ export async function exchangeGoogleCode(code: string, redirect_uri: string): Pr
   if (!r.ok) throw new Error(`auth ${r.status}: ${await r.text()}`);
   return r.json();
 }
+
+// ===== Per-chat settings sync =====
+
+export interface ServerChatSettings {
+  chat_key: string;
+  display_name?: string | null;
+  enabled: number; // SQLite stores boolean as 0/1
+  partner_lang: string;
+  preferred_lang: string;
+  updated_at: number;
+}
+
+export async function pullChatsFromServer(since = 0): Promise<ServerChatSettings[]> {
+  const r = await authedFetch(`/settings/chats?since=${since}`);
+  if (!r.ok) throw new Error(`pull chats ${r.status}`);
+  const data = (await r.json()) as { chats: ServerChatSettings[] };
+  return data.chats;
+}
+
+export async function pushChatsToServer(
+  chats: Array<{
+    chat_key: string;
+    display_name?: string | null;
+    enabled: boolean;
+    partner_lang: string;
+    preferred_lang: string;
+    updated_at: number;
+  }>
+): Promise<void> {
+  if (chats.length === 0) return;
+  const r = await authedFetch('/settings/chats', { method: 'PUT', body: JSON.stringify(chats) });
+  if (!r.ok) throw new Error(`push chats ${r.status}`);
+}
