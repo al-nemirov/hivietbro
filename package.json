@@ -1,0 +1,36 @@
+{
+  "name": "zalo-bridge-extension",
+  "displayName": "Zalo Bridge",
+  "version": "0.0.1",
+  "description": "Real-time перевод чата Zalo через Claude API. Ты пишешь по-русски — собеседник видит на вьетнамском, и наоборот.",
+  "author": "Alexander Nemirov",
+  "scripts": {
+    "dev": "plasmo dev",
+    "build": "plasmo build",
+    "build:firefox": "plasmo build --target=firefox-mv2",
+    "package": "plasmo package"
+  },
+  "dependencies": {
+    "@plasmohq/storage": "^1.13.0",
+    "plasmo": "^0.90.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.270",
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "typescript": "^5.6.0"
+  },
+  "manifest": {
+    "host_permissions": [
+      "https://chat.zalo.me/*",
+      "https://*.zalo.me/*"
+    ],
+    "permissions": [
+      "storage",
+      "activeTab"
+    ]
+  }
+}
