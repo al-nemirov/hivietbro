@@ -26,11 +26,16 @@
   "manifest": {
     "host_permissions": [
       "https://chat.zalo.me/*",
-      "https://*.zalo.me/*"
+      "https://*.zalo.me/*",
+      "https://accounts.google.com/*",
+      "https://oauth2.googleapis.com/*",
+      "https://zalo-bridge-api.aleuphoria.workers.dev/*"
     ],
     "permissions": [
       "storage",
-      "activeTab"
-    ]
+      "activeTab",
+      "identity"
+    ],
+    "key": "REPLACE_AFTER_FIRST_BUILD_SEE_docs_setup.md"
   }
 }

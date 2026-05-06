@@ -1,41 +1,78 @@
-// Plasmo MV3 service worker — обрабатывает OAuth flow и сообщения от popup/content
+// Plasmo MV3 service worker — auth через chrome.identity.launchWebAuthFlow
 import { exchangeGoogleCode } from './lib/api';
 import { setToken, setUser } from './lib/storage';
-import { DASHBOARD_URL } from './lib/config';
 
-// На MV3 background — это service worker, без window.
+// Google OAuth client ID — будет в .env (PLASMO_PUBLIC_GOOGLE_CLIENT_ID)
+const GOOGLE_CLIENT_ID =
+  process.env.PLASMO_PUBLIC_GOOGLE_CLIENT_ID ?? '';
+
+const SCOPES = ['openid', 'email', 'profile'];
+
+async function startGoogleOAuth(): Promise<{ ok: boolean; user?: unknown; error?: string }> {
+  if (!GOOGLE_CLIENT_ID) {
+    return { ok: false, error: 'PLASMO_PUBLIC_GOOGLE_CLIENT_ID не задан в .env' };
+  }
+
+  // chrome.identity.getRedirectURL() возвращает https://<extension-id>.chromiumapp.org/
+  const redirectUri = chrome.identity.getRedirectURL();
+  const state = crypto.randomUUID();
+
+  const authUrl =
+    'https://accounts.google.com/o/oauth2/v2/auth?' +
+    new URLSearchParams({
+      response_type: 'code',
+      client_id: GOOGLE_CLIENT_ID,
+      redirect_uri: redirectUri,
+      scope: SCOPES.join(' '),
+      access_type: 'online',
+      prompt: 'select_account',
+      state,
+    }).toString();
+
+  return new Promise((resolve) => {
+    chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: true }, async (responseUrl) => {
+      if (chrome.runtime.lastError || !responseUrl) {
+        resolve({ ok: false, error: chrome.runtime.lastError?.message ?? 'no responseUrl' });
+        return;
+      }
+
+      try {
+        const url = new URL(responseUrl);
+        const code = url.searchParams.get('code');
+        const returnedState = url.searchParams.get('state');
+        if (!code) {
+          resolve({ ok: false, error: 'no code in callback' });
+          return;
+        }
+        if (returnedState !== state) {
+          resolve({ ok: false, error: 'state mismatch (CSRF)' });
+          return;
+        }
+
+        // Worker делает обмен code → tokens, валидирует id_token, возвращает JWT
+        const result = await exchangeGoogleCode(code, redirectUri);
+        await setToken(result.token);
+        await setUser(result.user);
+        resolve({ ok: true, user: result.user });
+      } catch (e) {
+        resolve({ ok: false, error: (e as Error).message });
+      }
+    });
+  });
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     try {
       if (msg.type === 'login') {
-        // Открываем dashboard для OAuth — он редиректит обратно в расширение
-        const redirectUri = chrome.identity.getRedirectURL('google');
-        await chrome.tabs.create({ url: `${DASHBOARD_URL}/auth/start?ext_redirect=${encodeURIComponent(redirectUri)}` });
-        sendResponse({ ok: true });
+        const result = await startGoogleOAuth();
+        sendResponse(result);
         return;
       }
-
-      if (msg.type === 'oauth_callback') {
-        // Альтернативный flow: dashboard передаёт code прямо в extension через postMessage
-        const { code, redirect_uri } = msg;
-        const result = await exchangeGoogleCode(code, redirect_uri);
-        await setToken(result.token);
-        await setUser(result.user);
-        sendResponse({ ok: true, user: result.user });
-        return;
-      }
-
-      sendResponse({ ok: false, error: 'unknown message' });
+      sendResponse({ ok: false, error: 'unknown message: ' + msg.type });
     } catch (e) {
       sendResponse({ ok: false, error: (e as Error).message });
     }
   })();
   return true; // async response
-});
-
-// При первой установке открыть welcome
-chrome.runtime.onInstalled.addListener((details) => {
-  if (details.reason === 'install') {
-    chrome.tabs.create({ url: `${DASHBOARD_URL}/welcome` });
-  }
 });
