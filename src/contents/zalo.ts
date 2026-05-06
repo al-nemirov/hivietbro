@@ -4,7 +4,7 @@
 import type { PlasmoCSConfig } from 'plasmo';
 import { translate as apiTranslate } from '../lib/api';
 import { getToken, isEnabled } from '../lib/storage';
-import { cacheGet, cacheSet } from '../lib/cache';
+import { cacheGet, cacheSet } from '../lib/cache-client';
 import {
   getOrInitChatSettings,
   setChatSettings,

@@ -1,22 +1,18 @@
 // Plasmo MV3 service worker — auth через chrome.identity.launchWebAuthFlow
+// + единое хранилище кэша (IDB здесь, доступ через messaging из popup и content script)
 import { exchangeGoogleCode } from './lib/api';
 import { setToken, setUser } from './lib/storage';
+import { cacheGet, cacheSet, cacheClear, cacheStats } from './lib/cache';
 
-// Google OAuth client ID — будет в .env (PLASMO_PUBLIC_GOOGLE_CLIENT_ID)
-const GOOGLE_CLIENT_ID =
-  process.env.PLASMO_PUBLIC_GOOGLE_CLIENT_ID ?? '';
-
+const GOOGLE_CLIENT_ID = process.env.PLASMO_PUBLIC_GOOGLE_CLIENT_ID ?? '';
 const SCOPES = ['openid', 'email', 'profile'];
 
 async function startGoogleOAuth(): Promise<{ ok: boolean; user?: unknown; error?: string }> {
   if (!GOOGLE_CLIENT_ID) {
     return { ok: false, error: 'PLASMO_PUBLIC_GOOGLE_CLIENT_ID не задан в .env' };
   }
-
-  // chrome.identity.getRedirectURL() возвращает https://<extension-id>.chromiumapp.org/
   const redirectUri = chrome.identity.getRedirectURL();
   const state = crypto.randomUUID();
-
   const authUrl =
     'https://accounts.google.com/o/oauth2/v2/auth?' +
     new URLSearchParams({
@@ -35,7 +31,6 @@ async function startGoogleOAuth(): Promise<{ ok: boolean; user?: unknown; error?
         resolve({ ok: false, error: chrome.runtime.lastError?.message ?? 'no responseUrl' });
         return;
       }
-
       try {
         const url = new URL(responseUrl);
         const code = url.searchParams.get('code');
@@ -48,8 +43,6 @@ async function startGoogleOAuth(): Promise<{ ok: boolean; user?: unknown; error?
           resolve({ ok: false, error: 'state mismatch (CSRF)' });
           return;
         }
-
-        // Worker делает обмен code → tokens, валидирует id_token, возвращает JWT
         const result = await exchangeGoogleCode(code, redirectUri);
         await setToken(result.token);
         await setUser(result.user);
@@ -64,12 +57,35 @@ async function startGoogleOAuth(): Promise<{ ok: boolean; user?: unknown; error?
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     try {
-      if (msg.type === 'login') {
-        const result = await startGoogleOAuth();
-        sendResponse(result);
-        return;
+      switch (msg?.type) {
+        case 'login': {
+          const result = await startGoogleOAuth();
+          sendResponse(result);
+          return;
+        }
+        case 'cache.get': {
+          const entry = await cacheGet(msg.qid, msg.src_lang, msg.tgt_lang);
+          sendResponse(entry);
+          return;
+        }
+        case 'cache.set': {
+          await cacheSet(msg.qid, msg.entry);
+          sendResponse({ ok: true });
+          return;
+        }
+        case 'cache.clear': {
+          await cacheClear();
+          sendResponse({ ok: true });
+          return;
+        }
+        case 'cache.stats': {
+          const stats = await cacheStats();
+          sendResponse(stats);
+          return;
+        }
+        default:
+          sendResponse({ ok: false, error: 'unknown message: ' + msg?.type });
       }
-      sendResponse({ ok: false, error: 'unknown message: ' + msg.type });
     } catch (e) {
       sendResponse({ ok: false, error: (e as Error).message });
     }

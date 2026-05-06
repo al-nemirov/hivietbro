@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getUser, isEnabled, setEnabled, clearAuth, type StoredUser } from './lib/storage';
 import { getUsage } from './lib/api';
-import { cacheClear, cacheStats } from './lib/cache';
+import { cacheClear, cacheStats } from './lib/cache-client';
 
 interface Usage {
   messages: number;

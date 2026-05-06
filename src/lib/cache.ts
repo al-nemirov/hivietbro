@@ -1,9 +1,11 @@
-// Локальный кэш переводов в IndexedDB с AES-GCM шифрованием.
-// Ключ деривится через PBKDF2 из локального seed (32 случайных байта),
-// сохранённого в chrome.storage.local. Защищает от случайного просмотра
-// IDB-файла другими процессами/расширениями (chrome.storage isolation).
+// IDB+AES-GCM кэш переводов. Используется ТОЛЬКО в background service worker —
+// чтобы и content script (chat.zalo.me origin), и popup (extension origin)
+// видели одни и те же записи. Доступ из других контекстов — через cache-client.ts
+// (messaging).
 
 import { Storage } from '@plasmohq/storage';
+import type { CacheEntry } from './cache-types';
+export type { CacheEntry } from './cache-types';
 
 const DB_NAME = 'zb-cache';
 const DB_VERSION = 1;
@@ -14,19 +16,11 @@ const PBKDF2_ITERATIONS = 100_000;
 
 const storage = new Storage();
 
-export interface CacheEntry {
-  src_text: string;
-  src_lang: string;
-  tgt_text: string;
-  tgt_lang: string;
-  ts: number;
-}
-
 interface DbRecord {
   qid: string;
   encrypted: ArrayBuffer;
   iv: ArrayBuffer;
-  src_lang: string; // плеинтекст для фильтрации без расшифровки
+  src_lang: string;
   tgt_lang: string;
   ts: number;
 }
@@ -102,7 +96,6 @@ export async function cacheGet(
     });
     if (!record) return null;
     if (record.tgt_lang !== expectedTgtLang) return null;
-    // backward-compat: старые записи без src_lang — игнорируем (заставит перевести с правильным src)
     if (record.src_lang && record.src_lang !== expectedSrcLang) return null;
     if (!record.src_lang) return null;
 
@@ -114,7 +107,7 @@ export async function cacheGet(
     );
     return JSON.parse(new TextDecoder().decode(decrypted)) as CacheEntry;
   } catch (e) {
-    console.warn('[zalo-bridge] cache get failed:', e);
+    console.warn('[zalo-bridge bg] cache get failed:', e);
     return null;
   }
 }
@@ -144,7 +137,7 @@ export async function cacheSet(qid: string, entry: CacheEntry): Promise<void> {
       req.onerror = () => reject(req.error);
     });
   } catch (e) {
-    console.warn('[zalo-bridge] cache set failed:', e);
+    console.warn('[zalo-bridge bg] cache set failed:', e);
   }
 }
 
@@ -160,7 +153,7 @@ export async function cacheClear(): Promise<void> {
     await storage.remove(SEED_KEY);
     cachedKey = null;
   } catch (e) {
-    console.warn('[zalo-bridge] cache clear failed:', e);
+    console.warn('[zalo-bridge bg] cache clear failed:', e);
   }
 }
 
