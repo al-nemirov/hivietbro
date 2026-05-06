@@ -1,104 +1,106 @@
 # HiVietBro — Chat Translation (browser extension)
 
-Open-source расширение, которое переводит твой чат на Zalo Web в реальном времени через Anthropic Claude API. Ты пишешь по-русски — собеседник видит на вьетнамском (или любом из 6 поддерживаемых языков). Входящие — автоматически переведены под оригиналом.
+Расширение для браузера, которое переводит чат в Zalo Web в реальном времени через Anthropic Claude API. Вы пишете на родном языке — собеседник получает сообщение на вьетнамском (или одном из шести поддерживаемых языков). Входящие сообщения автоматически переводятся под оригиналом.
 
-**Лицензия:** [AGPL-3.0-or-later](LICENSE) для open-source использования. Для коммерческого использования без обязательств AGPL — см. [COMMERCIAL.md](COMMERCIAL.md).
+**Лицензия:** [AGPL-3.0-or-later](LICENSE) для open-source использования. Для коммерческого использования без обязательств AGPL см. [COMMERCIAL.md](COMMERCIAL.md).
 
-## Что делает
+## Возможности
 
-- 🔄 Перехватывает входящие сообщения на `chat.zalo.me` → переводит → подсвечивает над оригиналом
-- ✏️ Когда пишешь по-русски и жмёшь Enter — переводит в выбранный язык и отправляет вьетнамским
-- 🌏 Поддержка VI, EN, ZH, JA, KO, FR — отдельная настройка для каждого чата
-- 🔒 Локальный AES-GCM шифрованный кэш — мгновенно показывает переводы при повторном открытии
-- 📚 Глоссарий — закрепить «Anh Tuấn → брат Туан» и подобные принудительные замены
-- 🪶 Без интрузивного UI — плавающий чип, draggable, можно перетащить куда удобно
+- 🔄 Входящие сообщения на `chat.zalo.me` автоматически переводятся и отображаются под оригиналом.
+- ✏️ При наборе сообщения на родном языке и нажатии Enter расширение переводит текст в выбранный язык партнёра и отправляет уже переведённый вариант.
+- 🌏 Поддерживается шесть языков партнёра: VI, EN, ZH, JA, KO, FR. Настройка хранится для каждого чата отдельно.
+- 🔒 Локальный кэш переводов на устройстве зашифрован AES-GCM и подтягивается мгновенно при повторном открытии чата.
+- 📚 Персональный глоссарий — принудительные переводы имён и терминов: «Anh Tuấn → брат Туан».
+- 🪶 Ненавязчивый интерфейс: компактная плавающая кнопка, которую можно перетащить в удобное место экрана.
 
 ## Архитектура
 
 ```
-[Browser extension (этот репо)]  →  [Backend API]  →  [Anthropic Claude]
-       AGPL-3.0, открытый              закрытый            third-party
+[Browser extension (данный репозиторий)] → [Backend API] → [Anthropic Claude]
+            AGPL-3.0, открытый                закрытый        third-party
 ```
 
-Расширение работает поверх **официального** клиента Zalo Web — вся сетевая часть и шифрование на стороне Zalo. Расширение только читает DOM и инжектит переведённый текст в нативное поле ввода. **Не нарушает ToS Zalo**, не использует неофициальные API.
+Расширение работает поверх **официального** клиента Zalo Web — вся сетевая часть и шифрование остаются на стороне Zalo. Расширение читает DOM и подставляет переведённый текст в нативное поле ввода. **Условия использования Zalo не нарушаются**, неофициальные API не используются.
 
-Бэкенд (Cloudflare Worker, который проксирует Claude API + биллинг + квоты) — закрытый, не входит в этот репозиторий. Расширение коммуницирует с бэкендом через JWT по HTTPS.
+Backend (Cloudflare Worker — проксирование Claude API, биллинг и квоты) закрытый и в этот репозиторий не входит. Связь между расширением и бэкендом происходит по HTTPS с авторизацией через JWT.
 
-## Что значит AGPL-3.0 для тебя
+## Что AGPL-3.0 означает на практике
 
-- ✅ Можешь использовать расширение бесплатно для любых личных целей.
-- ✅ Можешь форкнуть, изучить код, контрибутить.
-- ✅ Можешь модифицировать для собственных нужд.
-- ⚠ Если запускаешь модифицированную версию **как сервис, доступный другим людям через сеть** — обязан опубликовать твои модификации под AGPL.
-- ⚠ Если хочешь использовать код в **закрытом коммерческом продукте** — нужна [коммерческая лицензия](COMMERCIAL.md).
+- ✅ Расширение можно бесплатно использовать в личных целях.
+- ✅ Можно форкать репозиторий, изучать и модифицировать код, присылать pull requests.
+- ✅ Можно адаптировать для собственных нужд.
+- ⚠ Если модифицированная версия запускается **как сетевой сервис, доступный другим пользователям**, исходный код модификаций должен быть опубликован под той же лицензией AGPL.
+- ⚠ Для использования кода в **закрытом коммерческом продукте** требуется [коммерческая лицензия](COMMERCIAL.md).
 
-Это стандартная dual-licensing схема (как у MongoDB, Sidekiq, Qt).
+Это стандартная схема dual licensing, применяемая в MongoDB, Sidekiq, Qt и многих других проектах.
 
-## Установка
+## Установка для разработки
 
-1. Установи [Plasmo](https://plasmo.com): `npm install`
-2. `npm run dev`
-3. В Chrome: `chrome://extensions/` → Developer mode → Load unpacked → `build/chrome-mv3-dev/`
-4. В попапе расширения — войти через Google
-5. Открой `chat.zalo.me` → нажми чип внизу справа → включи перевод
+1. Установите зависимости: `npm install`
+2. Запустите Plasmo dev-сервер: `npm run dev`
+3. В Chrome откройте `chrome://extensions/`, включите Developer mode, нажмите **Load unpacked** и выберите папку `build/chrome-mv3-dev/`.
+4. В попапе расширения войдите через Google.
+5. Откройте `chat.zalo.me`, нажмите на плавающую кнопку внизу справа и включите перевод для нужного чата.
 
 ## Структура
 
 ```
 extension/
 ├── src/
-│   ├── contents/zalo.ts    Content script для chat.zalo.me
-│   ├── background.ts       Service worker — OAuth + IDB cache
-│   ├── popup.tsx           UI попапа
+│   ├── contents/zalo.ts        Content script для chat.zalo.me
+│   ├── background.ts           Service worker — OAuth + IDB cache
+│   ├── popup.tsx               UI попапа
 │   └── lib/
-│       ├── api.ts          Клиент Worker API
-│       ├── cache.ts        IndexedDB + AES-GCM (в background)
-│       ├── cache-client.ts Тонкий клиент к background
-│       ├── chat-settings.ts Per-chat настройки (chrome.storage)
-│       ├── glossary-client.ts CRUD над /glossary
-│       └── storage.ts      JWT + user wrapper
-├── assets/                 Иконки
-├── package.json            Plasmo manifest
-├── LICENSE                 AGPL-3.0
-└── COMMERCIAL.md           Контакт для коммерческой лицензии
+│       ├── api.ts              Клиент Worker API
+│       ├── cache.ts            IndexedDB + AES-GCM (в background)
+│       ├── cache-client.ts     Тонкий клиент к background
+│       ├── chat-settings.ts    Per-chat настройки (chrome.storage)
+│       ├── glossary-client.ts  CRUD над /glossary
+│       └── storage.ts          JWT + user wrapper
+├── assets/                     Иконки
+├── package.json                Plasmo manifest
+├── LICENSE                     AGPL-3.0
+└── COMMERCIAL.md               Контакт для коммерческой лицензии
 ```
 
 ## Сборка
 
 ```bash
-npm run dev          # Chrome MV3 + HMR
-npm run build        # Chrome MV3 production
+npm run dev            # Chrome MV3 с HMR
+npm run build          # Chrome MV3 production
 npm run build:firefox  # Firefox MV2
 ```
 
 ## Конфигурация
 
-Создай `.env.development` и `.env.production`:
+Создайте файлы `.env.development` и `.env.production`:
 
 ```
 PLASMO_PUBLIC_API_BASE=https://your-worker.workers.dev
 PLASMO_PUBLIC_GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
 ```
 
-Если хочешь использовать собственный backend вместо нашего — реализуй те же endpoints (см. [docs/api.md](https://github.com/.../docs/api.md)).
+Чтобы использовать собственный backend вместо нашего, реализуйте совместимые endpoints (см. [docs/api.md](https://github.com/.../docs/api.md)).
 
-## Контрибуции
+## Pull requests
 
-Pull requests welcome. Перед PR — убедись:
-- TypeScript компилится (`npx tsc --noEmit`)
-- Plasmo собирается (`npm run build`)
-- Селекторы Zalo (см. `src/contents/zalo.ts`) не сломаны на актуальном `chat.zalo.me`
+Pull requests приветствуются. Перед отправкой убедитесь, что:
+
+- TypeScript компилируется без ошибок: `npx tsc --noEmit`
+- Plasmo собирает production-сборку: `npm run build`
+- Селекторы Zalo (см. `src/contents/zalo.ts`) не сломаны на актуальной версии `chat.zalo.me`
 
 ## Troubleshooting
 
-**Extension context invalidated** в консоли — после reload расширения. Закрой вкладку chat.zalo.me и открой заново.
+**Сообщение «Extension context invalidated» в консоли** появляется после перезагрузки расширения и означает, что старая копия content script потеряла связь со service worker. Достаточно закрыть вкладку `chat.zalo.me` и открыть её заново.
 
-**Чип не появляется** — проверь, что:
-1. Залогинен (попап показывает email)
-2. Открыт реальный чат (#messageViewScroll присутствует в DOM)
-3. Console на странице не показывает ошибок начинающихся с `[zalo-bridge]`
+**Плавающая кнопка не появляется на странице.** Проверьте, что:
 
-**Иконка серая в тулбаре** — кликни 🧩 (puzzle piece) → найди расширение → 📌 (pin).
+1. Вы авторизованы (попап расширения показывает email).
+2. Открыт реальный чат (в DOM присутствует `#messageViewScroll`).
+3. В консоли страницы нет ошибок с префиксом `[zalo-bridge]`.
+
+**Иконка расширения серая в тулбаре браузера.** Нажмите 🧩 (puzzle piece) рядом с адресной строкой, найдите расширение и нажмите 📌, чтобы закрепить его на панели.
 
 ## Disclaimer
 
