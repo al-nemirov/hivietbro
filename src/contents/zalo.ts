@@ -1012,11 +1012,34 @@ async function interceptAndSend(input: HTMLElement, ruText: string): Promise<voi
     document.execCommand('delete', false);
     document.execCommand('insertText', false, vi);
 
-    await new Promise((r) => setTimeout(r, 80));
+    // Дополнительно дёрнем input event — на случай если Zalo не подхватил execCommand
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: vi }));
 
-    const sendBtn = document.querySelector(SEL.sendButton) as HTMLElement | null;
-    if (!sendBtn) throw new Error('кнопка отправки не найдена');
-    sendBtn.click();
+    // Поллим send-button до 600мс — Zalo'у нужно время на React rerender,
+    // чтобы кнопка появилась после смены input.empty -> input.with-text
+    let sendBtn: HTMLElement | null = null;
+    for (let i = 0; i < 12; i++) {
+      sendBtn = document.querySelector(SEL.sendButton) as HTMLElement | null;
+      if (sendBtn) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+
+    if (sendBtn) {
+      sendBtn.click();
+    } else {
+      // Fallback: если send-btn не появилась — дёрнем Enter-key dispatch
+      console.warn('[zalo-bridge] send button not found after 600ms, falling back to Enter key');
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          code: 'Enter',
+          keyCode: 13,
+          which: 13,
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+    }
 
     showStatus('Отправлено', 'success');
     setTimeout(hideStatus, 1000);
