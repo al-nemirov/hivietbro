@@ -903,16 +903,51 @@ function escapeHtml(s: string): string {
 
 // ===== ONBOARDING ===========================================================
 
+// Локализованные сообщения интерфейса. Язык определяется по navigator.language;
+// fallback на ru.
+const I18N: Record<string, { onboardTitle: string; onboardTip: string; close: string }> = {
+  ru: {
+    onboardTitle: 'Включите перевод для этого чата здесь.',
+    onboardTip: 'Иконку можно перетащить в любое место. Совет: избегайте сложных идиом и игры слов — точность перевода выше у простых фраз.',
+    close: 'понятно',
+  },
+  en: {
+    onboardTitle: 'Enable translation for this chat here.',
+    onboardTip: 'You can drag the icon anywhere. Tip: avoid heavy idioms and word-play — accuracy is higher for plain phrasing.',
+    close: 'got it',
+  },
+  ko: {
+    onboardTitle: '이 채팅의 번역을 여기서 활성화하세요.',
+    onboardTip: '아이콘은 원하는 위치로 드래그할 수 있습니다. 팁: 어려운 관용구나 말장난은 피하세요 — 단순한 표현일수록 번역 정확도가 높습니다.',
+    close: '확인',
+  },
+  vi: {
+    onboardTitle: 'Bật bản dịch cho cuộc trò chuyện này tại đây.',
+    onboardTip: 'Có thể kéo biểu tượng đến vị trí thuận tiện. Mẹo: tránh thành ngữ phức tạp và cách chơi chữ — bản dịch chính xác hơn với câu đơn giản.',
+    close: 'hiểu rồi',
+  },
+};
+
+function getUiLang(): string {
+  try {
+    const code = (navigator.language || 'ru').slice(0, 2).toLowerCase();
+    if (I18N[code]) return code;
+  } catch {}
+  return 'ru';
+}
+
 async function maybeShowOnboarding(chip: HTMLElement): Promise<void> {
   const seen = await localStorage_.get<boolean>(STORAGE_ONBOARD_SEEN);
   if (seen) return;
   if (document.querySelector(`.${TOOLTIP_CLASS}`)) return;
 
+  const t = I18N[getUiLang()];
   const tip = document.createElement('div');
   tip.className = TOOLTIP_CLASS;
   tip.innerHTML = `
-    <div>👇 Включи перевод для этого чата здесь.<br>Можно перетаскивать иконку куда удобно.</div>
-    <span class="${TOOLTIP_CLASS}__close">понятно</span>
+    <div><span style="display:inline-block;transform:translateY(2px);font-size:14px;margin-right:4px">↓</span>${escapeHtml(t.onboardTitle)}</div>
+    <div style="font-size:11.5px;opacity:0.85;margin-top:6px;line-height:1.45">${escapeHtml(t.onboardTip)}</div>
+    <span class="${TOOLTIP_CLASS}__close">${escapeHtml(t.close)}</span>
   `;
   document.body.appendChild(tip);
 
@@ -926,7 +961,7 @@ async function maybeShowOnboarding(chip: HTMLElement): Promise<void> {
     await localStorage_.set(STORAGE_ONBOARD_SEEN, true);
   };
   tip.querySelector(`.${TOOLTIP_CLASS}__close`)?.addEventListener('click', close);
-  setTimeout(close, 12_000);
+  setTimeout(close, 14_000);
 }
 
 // ===== OUTGOING — перехват + preview =======================================
