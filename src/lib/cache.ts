@@ -2,9 +2,6 @@
 // Ключ деривится через PBKDF2 из локального seed (32 случайных байта),
 // сохранённого в chrome.storage.local. Защищает от случайного просмотра
 // IDB-файла другими процессами/расширениями (chrome.storage isolation).
-//
-// Это soft-encryption: атакующий с FS-доступом + содержимым chrome.storage
-// сможет расшифровать. Реальная защита — Chrome's profile sandbox.
 
 import { Storage } from '@plasmohq/storage';
 
@@ -29,6 +26,7 @@ interface DbRecord {
   qid: string;
   encrypted: ArrayBuffer;
   iv: ArrayBuffer;
+  src_lang: string; // плеинтекст для фильтрации без расшифровки
   tgt_lang: string;
   ts: number;
 }
@@ -91,6 +89,7 @@ async function getDb(): Promise<IDBDatabase> {
 
 export async function cacheGet(
   qid: string,
+  expectedSrcLang: string,
   expectedTgtLang: string
 ): Promise<CacheEntry | null> {
   try {
@@ -103,6 +102,9 @@ export async function cacheGet(
     });
     if (!record) return null;
     if (record.tgt_lang !== expectedTgtLang) return null;
+    // backward-compat: старые записи без src_lang — игнорируем (заставит перевести с правильным src)
+    if (record.src_lang && record.src_lang !== expectedSrcLang) return null;
+    if (!record.src_lang) return null;
 
     const key = await getKey();
     const decrypted = await crypto.subtle.decrypt(
@@ -134,6 +136,7 @@ export async function cacheSet(qid: string, entry: CacheEntry): Promise<void> {
         qid,
         encrypted,
         iv: iv.buffer,
+        src_lang: entry.src_lang,
         tgt_lang: entry.tgt_lang,
         ts: Date.now(),
       } as DbRecord);

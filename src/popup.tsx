@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getUser, isEnabled, setEnabled, clearAuth, type StoredUser } from './lib/storage';
 import { getUsage } from './lib/api';
-import { DASHBOARD_URL } from './lib/config';
 import { cacheClear, cacheStats } from './lib/cache';
 
 interface Usage {
@@ -179,9 +178,8 @@ function Popup() {
         </div>
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginTop: 14, background: C.divider, borderRadius: 10, overflow: 'hidden' }}>
-        <NavLink href={`${DASHBOARD_URL}/account`}>Личный кабинет</NavLink>
-        <NavLink href={`${DASHBOARD_URL}/glossary`}>Глоссарий</NavLink>
+      <div style={{ marginTop: 14, padding: 12, background: '#f0f7ff', borderRadius: 10, fontSize: 11.5, color: C.textMuted, lineHeight: 1.5 }}>
+        Перевод включается <strong style={{ color: C.text }}>в каждом чате отдельно</strong> через банер над сообщениями. По умолчанию все чаты — выключены.
       </div>
 
       <button onClick={onLogout} style={btnGhost}>Выйти</button>
@@ -197,21 +195,6 @@ function Stat({ label, value, sub }: { label: string; value: number | string; su
       <div style={{ fontSize: 22, fontWeight: 700, color: C.text, marginTop: 4, lineHeight: 1 }}>{value}</div>
       <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>{sub}</div>
     </div>
-  );
-}
-
-function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <a
-      href={href}
-      target="_blank"
-      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 14px', background: C.card, fontSize: 13, color: C.text, textDecoration: 'none' }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = '#f8f9fb')}
-      onMouseLeave={(e) => (e.currentTarget.style.background = C.card)}
-    >
-      <span>{children}</span>
-      <span style={{ color: C.textDim, fontSize: 14 }}>›</span>
-    </a>
   );
 }
 

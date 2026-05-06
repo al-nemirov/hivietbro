@@ -5,6 +5,12 @@ import type { PlasmoCSConfig } from 'plasmo';
 import { translate as apiTranslate } from '../lib/api';
 import { getToken, isEnabled } from '../lib/storage';
 import { cacheGet, cacheSet } from '../lib/cache';
+import {
+  getOrInitChatSettings,
+  setChatSettings,
+  SUPPORTED_PARTNER_LANGS,
+  type ChatSettings,
+} from '../lib/chat-settings';
 
 export const config: PlasmoCSConfig = {
   matches: ['https://chat.zalo.me/*'],
@@ -18,7 +24,6 @@ const SEL = {
   messageBubble: '[data-component="bubble-message"]',
   messageText: '[data-component="message-text-content"]',
   inputField: '#richInput',
-  inputContent: '.chat-input-content',
   sendButton: '.send-msg-btn',
 };
 
@@ -29,20 +34,16 @@ const QID_HOST_SELECTOR = '[data-component="message-content-view"]';
 const OVERLAY_CLASS = 'zb-overlay';
 const OVERLAY_DATA_ATTR = 'data-zb-msg-id';
 const STATUS_CLASS = 'zb-status';
-
-interface UserSettings {
-  preferred_lang: string;
-  partner_lang: string;
-}
-
-let settings: UserSettings = { preferred_lang: 'ru', partner_lang: 'vi' };
+const BANNER_CLASS = 'zb-banner';
 
 let attachedMsgRoot: Element | null = null;
 let msgObserver: MutationObserver | null = null;
 let translationInFlight = false;
 let outgoingHandlersAttached = false;
 
-// Дедуп параллельных переводов одного и того же qid (если ремоунт случился во время сетевого запроса)
+let currentChatKey: string | null = null;
+let currentChatSettings: ChatSettings | null = null;
+
 const pending = new Map<string, Promise<string>>();
 
 async function bootstrap(): Promise<void> {
@@ -69,10 +70,6 @@ function injectStyles(): void {
     @keyframes zb-pulse {
       0%, 100% { opacity: 0.4; }
       50% { opacity: 0.8; }
-    }
-    @keyframes zb-slide-up {
-      from { opacity: 0; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
     }
 
     .${OVERLAY_CLASS} {
@@ -125,25 +122,18 @@ function injectStyles(): void {
       color: #fff;
       border-radius: 18px;
       font: 500 12.5px/1.2 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      letter-spacing: 0.1px;
       box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18), 0 1px 3px rgba(0, 0, 0, 0.1);
       z-index: 99999;
       pointer-events: none;
       opacity: 0;
       transform: translateY(12px);
       transition: opacity 0.18s ease, transform 0.18s ease;
-      max-width: 280px;
       display: flex;
       align-items: center;
       gap: 8px;
     }
-    .${STATUS_CLASS}--show {
-      opacity: 1;
-      transform: translateY(0);
-    }
-    .${STATUS_CLASS}--error {
-      background: rgba(185, 28, 28, 0.95);
-    }
+    .${STATUS_CLASS}--show { opacity: 1; transform: translateY(0); }
+    .${STATUS_CLASS}--error { background: rgba(185, 28, 28, 0.95); }
     .${STATUS_CLASS}__dot {
       width: 6px;
       height: 6px;
@@ -152,14 +142,114 @@ function injectStyles(): void {
       animation: zb-pulse 1s ease-in-out infinite;
       flex: 0 0 auto;
     }
-    .${STATUS_CLASS}--success .${STATUS_CLASS}__dot {
-      background: #10b981;
-      animation: none;
+    .${STATUS_CLASS}--success .${STATUS_CLASS}__dot { background: #10b981; animation: none; }
+    .${STATUS_CLASS}--error .${STATUS_CLASS}__dot { background: #fca5a5; animation: none; }
+
+    .${BANNER_CLASS} {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 14px;
+      background: linear-gradient(to bottom, #f7faff, #f0f4fb);
+      border-bottom: 1px solid #e6e8ec;
+      font: 500 12.5px/1.3 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: #475569;
+      flex-shrink: 0;
+      z-index: 5;
     }
-    .${STATUS_CLASS}--error .${STATUS_CLASS}__dot {
-      background: #fca5a5;
-      animation: none;
+    .${BANNER_CLASS}__title {
+      flex: 0 0 auto;
+      color: #475569;
     }
+    .${BANNER_CLASS}__chat {
+      font-weight: 600;
+      color: #1a1d24;
+    }
+    .${BANNER_CLASS}__lang {
+      flex: 0 0 auto;
+      padding: 4px 10px;
+      background: #fff;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      cursor: pointer;
+      font: inherit;
+      font-weight: 600;
+      color: #1a1d24;
+      transition: border-color 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .${BANNER_CLASS}__lang:hover { border-color: #4082ff; }
+    .${BANNER_CLASS}__lang::after { content: '▾'; font-size: 9px; opacity: 0.5; margin-left: 2px; }
+    .${BANNER_CLASS}__toggle {
+      flex: 0 0 auto;
+      margin-left: auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .${BANNER_CLASS}__switch {
+      width: 32px;
+      height: 18px;
+      background: #cbd5e1;
+      border-radius: 9px;
+      position: relative;
+      transition: background 0.15s ease;
+      border: 0;
+      padding: 0;
+      cursor: pointer;
+    }
+    .${BANNER_CLASS}__switch::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 14px;
+      height: 14px;
+      border-radius: 7px;
+      background: #fff;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+      transition: left 0.15s ease;
+    }
+    .${BANNER_CLASS}--on .${BANNER_CLASS}__switch { background: #4082ff; }
+    .${BANNER_CLASS}--on .${BANNER_CLASS}__switch::after { left: 16px; }
+    .${BANNER_CLASS}__state {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+      color: #94a3b8;
+    }
+    .${BANNER_CLASS}--on .${BANNER_CLASS}__state { color: #10b981; }
+
+    .${BANNER_CLASS}__menu {
+      position: absolute;
+      top: calc(100% + 4px);
+      background: #fff;
+      border: 1px solid #e6e8ec;
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+      min-width: 180px;
+      padding: 4px 0;
+      z-index: 10;
+    }
+    .${BANNER_CLASS}__menu-item {
+      display: block;
+      width: 100%;
+      padding: 8px 14px;
+      background: transparent;
+      border: 0;
+      cursor: pointer;
+      font: inherit;
+      text-align: left;
+      color: #1a1d24;
+    }
+    .${BANNER_CLASS}__menu-item:hover { background: #f3f4f6; }
+    .${BANNER_CLASS}__menu-item--active { background: #e8f0ff; color: #1d4ed8; font-weight: 600; }
   `;
   const style = document.createElement('style');
   style.id = 'zb-styles';
@@ -184,21 +274,36 @@ function extractText(bubble: Element): string {
   return (t?.textContent ?? '').trim();
 }
 
-function getChatHash(): string | undefined {
+function getChatKey(): string | null {
   const input = document.querySelector(SEL.inputField) as HTMLElement | null;
-  return input?.dataset?.trailer || undefined;
+  return input?.dataset?.trailer || null;
+}
+
+async function loadCurrentChatSettings(): Promise<void> {
+  const k = getChatKey();
+  if (!k) {
+    currentChatKey = null;
+    currentChatSettings = null;
+    return;
+  }
+  if (k === currentChatKey && currentChatSettings) return; // не меняли
+  currentChatKey = k;
+  currentChatSettings = await getOrInitChatSettings(k, k);
 }
 
 async function processBubble(bubble: Element): Promise<void> {
   if (isOutgoing(bubble)) return;
-  // Если на этом DOM-узле уже есть наш overlay — не дублируем
   if (bubble.querySelector(`[${OVERLAY_DATA_ATTR}]`)) return;
+  if (!currentChatSettings || !currentChatSettings.enabled) return;
 
   const qid = getBubbleStableId(bubble);
   if (!qid) return;
 
   const text = extractText(bubble);
   if (!text) return;
+
+  const srcLang = currentChatSettings.partner_lang;
+  const tgtLang = currentChatSettings.preferred_lang;
 
   const target = bubble.querySelector('.message-content-wrapper') ?? bubble;
   const overlay = document.createElement('div');
@@ -209,42 +314,40 @@ async function processBubble(bubble: Element): Promise<void> {
   target.appendChild(overlay);
 
   try {
-    // 1. Локальный кэш (IDB + AES-GCM): мгновенно для уже виденных сообщений
-    const cached = await cacheGet(qid, settings.preferred_lang);
+    const cached = await cacheGet(qid, srcLang, tgtLang);
     if (cached && cached.src_text === text) {
       overlay.textContent = cached.tgt_text;
       overlay.dataset.loading = '0';
       return;
     }
 
-    // 2. In-flight дедуп: при ремоунте во время сетевого запроса не плодим параллельных
     let translation: string;
-    if (pending.has(qid)) {
-      translation = await pending.get(qid)!;
+    const pendKey = `${qid}|${srcLang}|${tgtLang}`;
+    if (pending.has(pendKey)) {
+      translation = await pending.get(pendKey)!;
     } else {
       const p = (async () => {
         const result = await apiTranslate({
           text,
-          source_lang: settings.partner_lang,
-          target_lang: settings.preferred_lang,
+          source_lang: srcLang,
+          target_lang: tgtLang,
           direction: 'incoming',
-          chat_id: getChatHash(),
+          chat_id: currentChatKey ?? undefined,
         });
-        // Сохраняем в локальный кэш — следующий раз будет мгновенно
         await cacheSet(qid, {
           src_text: text,
-          src_lang: settings.partner_lang,
+          src_lang: srcLang,
           tgt_text: result.translation,
-          tgt_lang: settings.preferred_lang,
+          tgt_lang: tgtLang,
           ts: Date.now(),
         });
         return result.translation;
       })();
-      pending.set(qid, p);
+      pending.set(pendKey, p);
       try {
         translation = await p;
       } finally {
-        pending.delete(qid);
+        pending.delete(pendKey);
       }
     }
 
@@ -257,16 +360,24 @@ async function processBubble(bubble: Element): Promise<void> {
   }
 }
 
+function rescanVisibleMessages(): void {
+  if (!attachedMsgRoot) return;
+  // Удаляем существующие overlay'и (если только что выключили перевод — они должны исчезнуть)
+  if (!currentChatSettings?.enabled) {
+    attachedMsgRoot.querySelectorAll(`.${OVERLAY_CLASS}`).forEach((el) => el.remove());
+    return;
+  }
+  attachedMsgRoot.querySelectorAll(SEL.messageBubble).forEach((b) => void processBubble(b));
+}
+
 function attachMessageObserver(root: Element): void {
-  if (attachedMsgRoot === root) return; // тот же узел, обзёрвер уже стоит
+  if (attachedMsgRoot === root) return;
   if (msgObserver) {
     msgObserver.disconnect();
     msgObserver = null;
   }
   attachedMsgRoot = root;
-
-  // Обработать уже отрисованные баблы
-  root.querySelectorAll(SEL.messageBubble).forEach((b) => void processBubble(b));
+  rescanVisibleMessages();
 
   msgObserver = new MutationObserver((muts) => {
     for (const m of muts) {
@@ -281,7 +392,94 @@ function attachMessageObserver(root: Element): void {
     }
   });
   msgObserver.observe(root, { childList: true, subtree: true });
-  console.info('[zalo-bridge] message observer attached on', root);
+}
+
+// ===== BANNER (per-chat settings UI) =======================================
+
+function injectBanner(msgRoot: Element): void {
+  // Ищем родителя scroll-контейнера и вставляем баннер выше
+  const parent = msgRoot.parentElement;
+  if (!parent) return;
+  if (parent.querySelector(`.${BANNER_CLASS}`)) return;
+
+  const banner = document.createElement('div');
+  banner.className = BANNER_CLASS;
+  parent.insertBefore(banner, msgRoot);
+  renderBanner(banner);
+}
+
+function renderBanner(banner: HTMLElement): void {
+  const s = currentChatSettings;
+  const chatName = currentChatKey ?? '?';
+  const langInfo = SUPPORTED_PARTNER_LANGS.find((l) => l.code === s?.partner_lang);
+  const flagLabel = langInfo?.flag ?? s?.partner_lang.toUpperCase() ?? '?';
+
+  banner.classList.toggle(`${BANNER_CLASS}--on`, !!s?.enabled);
+  banner.innerHTML = `
+    <span class="${BANNER_CLASS}__title">
+      Перевод с <button class="${BANNER_CLASS}__lang" type="button">${flagLabel}</button> ↔ <strong>${(s?.preferred_lang ?? 'ru').toUpperCase()}</strong>
+      &nbsp;·&nbsp; <span class="${BANNER_CLASS}__chat">${chatName}</span>
+    </span>
+    <label class="${BANNER_CLASS}__toggle">
+      <span class="${BANNER_CLASS}__state">${s?.enabled ? 'ON' : 'OFF'}</span>
+      <button class="${BANNER_CLASS}__switch" type="button"></button>
+    </label>
+  `;
+
+  const langBtn = banner.querySelector(`.${BANNER_CLASS}__lang`) as HTMLButtonElement;
+  langBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openLangMenu(banner, langBtn);
+  });
+
+  const switchBtn = banner.querySelector(`.${BANNER_CLASS}__switch`) as HTMLButtonElement;
+  switchBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!currentChatKey || !currentChatSettings) return;
+    currentChatSettings = { ...currentChatSettings, enabled: !currentChatSettings.enabled };
+    await setChatSettings(currentChatKey, currentChatSettings);
+    renderBanner(banner);
+    rescanVisibleMessages();
+  });
+}
+
+function openLangMenu(banner: HTMLElement, anchor: HTMLElement): void {
+  // закроем существующее меню
+  banner.querySelector(`.${BANNER_CLASS}__menu`)?.remove();
+
+  const menu = document.createElement('div');
+  menu.className = `${BANNER_CLASS}__menu`;
+  const rect = anchor.getBoundingClientRect();
+  const bRect = banner.getBoundingClientRect();
+  menu.style.left = `${rect.left - bRect.left}px`;
+
+  for (const lang of SUPPORTED_PARTNER_LANGS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className =
+      `${BANNER_CLASS}__menu-item` +
+      (lang.code === currentChatSettings?.partner_lang ? ` ${BANNER_CLASS}__menu-item--active` : '');
+    btn.innerHTML = `<strong>${lang.flag}</strong> &nbsp; ${lang.label}`;
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!currentChatKey || !currentChatSettings) return;
+      currentChatSettings = { ...currentChatSettings, partner_lang: lang.code };
+      await setChatSettings(currentChatKey, currentChatSettings);
+      menu.remove();
+      renderBanner(banner);
+      rescanVisibleMessages();
+    });
+    menu.appendChild(btn);
+  }
+  banner.appendChild(menu);
+
+  const close = (ev: MouseEvent): void => {
+    if (!menu.contains(ev.target as Node)) {
+      menu.remove();
+      document.removeEventListener('click', close, true);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', close, true), 0);
 }
 
 // ===== OUTGOING — перехват натуральной отправки ============================
@@ -310,11 +508,7 @@ function showStatus(text: string, variant: StatusVariant = 'progress'): void {
 
 function hideStatus(): void {
   const el = getStatus();
-  el.classList.remove(
-    `${STATUS_CLASS}--show`,
-    `${STATUS_CLASS}--error`,
-    `${STATUS_CLASS}--success`
-  );
+  el.classList.remove(`${STATUS_CLASS}--show`, `${STATUS_CLASS}--error`, `${STATUS_CLASS}--success`);
 }
 
 function attachOutgoingInterceptors(): void {
@@ -326,6 +520,7 @@ function attachOutgoingInterceptors(): void {
     (e) => {
       if (translationInFlight) return;
       if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (!currentChatSettings?.enabled) return; // если перевод выключен — не трогаем
       const input = document.querySelector(SEL.inputField) as HTMLElement | null;
       if (!input) return;
       if (!input.contains(e.target as Node)) return;
@@ -343,6 +538,7 @@ function attachOutgoingInterceptors(): void {
     'click',
     (e) => {
       if (translationInFlight) return;
+      if (!currentChatSettings?.enabled) return;
       const btn = (e.target as Element)?.closest?.(SEL.sendButton) as HTMLElement | null;
       if (!btn) return;
       const input = document.querySelector(SEL.inputField) as HTMLElement | null;
@@ -356,22 +552,21 @@ function attachOutgoingInterceptors(): void {
     },
     true
   );
-
-  console.info('[zalo-bridge] outgoing interceptors attached');
 }
 
 async function interceptAndSend(input: HTMLElement, ruText: string): Promise<void> {
   if (translationInFlight) return;
+  if (!currentChatSettings) return;
   translationInFlight = true;
   showStatus('Перевожу…');
 
   try {
     const result = await apiTranslate({
       text: ruText,
-      source_lang: settings.preferred_lang,
-      target_lang: settings.partner_lang,
+      source_lang: currentChatSettings.preferred_lang,
+      target_lang: currentChatSettings.partner_lang,
       direction: 'outgoing',
-      chat_id: getChatHash(),
+      chat_id: currentChatKey ?? undefined,
     });
     const vi = result.translation;
     if (!vi) throw new Error('пустой перевод');
@@ -401,19 +596,30 @@ async function interceptAndSend(input: HTMLElement, ruText: string): Promise<voi
 // ===== ROOT WATCHER =========================================================
 
 function watchUI(): void {
-  const tryAttach = (): void => {
+  let lastChatKey: string | null = null;
+
+  const tryAttach = async (): Promise<void> => {
     const msgRoot = document.querySelector(SEL.messageContainer);
-    if (msgRoot) attachMessageObserver(msgRoot);
+    if (!msgRoot) return;
+
+    // Перечитать настройки если ключ чата изменился
+    const k = getChatKey();
+    if (k !== lastChatKey) {
+      lastChatKey = k;
+      await loadCurrentChatSettings();
+    }
+
+    if (msgRoot !== attachedMsgRoot) attachMessageObserver(msgRoot);
+    injectBanner(msgRoot);
+    const banner = msgRoot.parentElement?.querySelector(`.${BANNER_CLASS}`) as HTMLElement | null;
+    if (banner) renderBanner(banner);
   };
 
-  tryAttach();
+  void tryAttach();
 
-  // body-watcher: переключения чатов, медленный SPA-рендер.
-  // attachMessageObserver сам решает, нужно ли передёрнуть observer (другой узел?)
   const bodyObs = new MutationObserver(() => {
     const root = document.querySelector(SEL.messageContainer);
     if (!root) {
-      // контейнера сейчас нет — забудем старый узел
       attachedMsgRoot = null;
       if (msgObserver) {
         msgObserver.disconnect();
@@ -421,7 +627,7 @@ function watchUI(): void {
       }
       return;
     }
-    tryAttach();
+    void tryAttach();
   });
   bodyObs.observe(document.body, { childList: true, subtree: true });
 }
