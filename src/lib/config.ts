@@ -4,7 +4,7 @@ export const API_BASE =
   process.env.PLASMO_PUBLIC_API_BASE ?? 'https://zalo-bridge-api.aleuphoria.workers.dev';
 
 export const DASHBOARD_URL =
-  process.env.PLASMO_PUBLIC_DASHBOARD_URL ?? 'https://zalo-bridge.pages.dev';
+  process.env.PLASMO_PUBLIC_DASHBOARD_URL ?? 'https://hivietbro.com';
 
 // Storage keys
 export const STORAGE = {
