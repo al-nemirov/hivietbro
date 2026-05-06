@@ -94,3 +94,17 @@ export async function deleteChatSettings(chatKey: string): Promise<void> {
   const next = index.filter((k) => k !== chatKey);
   await storage.set(INDEX_KEY, next);
 }
+
+/**
+ * Миграция настроек со старого ключа (trailer) на новый (qid prefix).
+ * Если по новому ключу ничего нет, но по старому есть — копируем.
+ */
+export async function migrateChatSettings(newKey: string, oldKey: string): Promise<ChatSettings | null> {
+  if (newKey === oldKey) return null;
+  const [newer, older] = await Promise.all([getChatSettings(newKey), getChatSettings(oldKey)]);
+  if (newer) return null; // уже мигрировали
+  if (!older) return null; // нечего мигрировать
+  await setChatSettings(newKey, { ...older, display_name: older.display_name ?? oldKey });
+  await deleteChatSettings(oldKey);
+  return { ...older };
+}

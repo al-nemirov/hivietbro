@@ -2,6 +2,12 @@ import { useEffect, useState } from 'react';
 import { getUser, isEnabled, setEnabled, clearAuth, type StoredUser } from './lib/storage';
 import { getUsage } from './lib/api';
 import { cacheClear, cacheStats } from './lib/cache-client';
+import {
+  listGlossary,
+  upsertGlossary,
+  deleteGlossary,
+  type GlossaryEntry,
+} from './lib/glossary-client';
 
 interface Usage {
   messages: number;
@@ -23,7 +29,10 @@ const C = {
   divider: '#f0f2f5',
 };
 
+type Tab = 'main' | 'glossary';
+
 function Popup() {
+  const [tab, setTab] = useState<Tab>('main');
   const [user, setUserState] = useState<StoredUser | null>(null);
   const [enabled, setEnabledState] = useState(true);
   const [usage, setUsageState] = useState<Usage | null>(null);
@@ -121,7 +130,6 @@ function Popup() {
 
   const planLabel = user.is_admin ? 'admin · безлимит' : user.plan === 'pro' ? 'pro' : user.plan === 'byok' ? 'свой ключ' : 'free';
   const planAccent = user.is_admin ? C.accent : user.plan === 'pro' ? C.success : user.plan === 'byok' ? '#8b5cf6' : C.textMuted;
-
   const initials = (user.display_name || user.email).slice(0, 1).toUpperCase();
 
   return (
@@ -134,6 +142,48 @@ function Popup() {
         </div>
       </div>
 
+      <div style={tabBar}>
+        <button onClick={() => setTab('main')} style={tabBtn(tab === 'main')}>Обзор</button>
+        <button onClick={() => setTab('glossary')} style={tabBtn(tab === 'glossary')}>Глоссарий</button>
+      </div>
+
+      {tab === 'main' && (
+        <MainTab
+          user={user}
+          enabled={enabled}
+          usage={usage}
+          cacheCount={cacheCount}
+          planLabel={planLabel}
+          planAccent={planAccent}
+          initials={initials}
+          onToggle={onToggle}
+          onLogout={onLogout}
+          onClearCache={onClearCache}
+        />
+      )}
+
+      {tab === 'glossary' && <GlossaryTab />}
+
+      <div style={footer}>v0.0.1 · {user.is_admin ? 'admin' : user.plan}</div>
+    </div>
+  );
+}
+
+function MainTab(props: {
+  user: StoredUser;
+  enabled: boolean;
+  usage: Usage | null;
+  cacheCount: number;
+  planLabel: string;
+  planAccent: string;
+  initials: string;
+  onToggle: () => void;
+  onLogout: () => void;
+  onClearCache: () => void;
+}) {
+  const { user, enabled, usage, cacheCount, planLabel, planAccent, initials, onToggle, onLogout, onClearCache } = props;
+  return (
+    <>
       <div style={{ ...card, padding: 14, marginTop: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {user.picture_url ? (
@@ -158,9 +208,9 @@ function Popup() {
       <div style={{ ...card, padding: 14, marginTop: 10 }}>
         <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
           <div>
-            <div style={{ fontSize: 14, fontWeight: 500, color: C.text }}>Перевод включён</div>
+            <div style={{ fontSize: 14, fontWeight: 500, color: C.text }}>Расширение работает</div>
             <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>
-              {enabled ? 'Сообщения переводятся автоматически' : 'Расширение пассивно'}
+              {enabled ? 'Реагирует на chat.zalo.me' : 'Полностью пассивно'}
             </div>
           </div>
           <Switch checked={enabled} onChange={onToggle} />
@@ -179,11 +229,153 @@ function Popup() {
       )}
 
       <div style={{ marginTop: 14, padding: 12, background: '#f0f7ff', borderRadius: 10, fontSize: 11.5, color: C.textMuted, lineHeight: 1.5 }}>
-        Перевод включается <strong style={{ color: C.text }}>в каждом чате отдельно</strong> через банер над сообщениями. По умолчанию все чаты — выключены.
+        Перевод включается <strong style={{ color: C.text }}>в каждом чате отдельно</strong> через плавающий чип. Можно перетаскивать.
       </div>
 
       <button onClick={onLogout} style={btnGhost}>Выйти</button>
-      <div style={footer}>v0.0.1 · {user.is_admin ? 'admin' : user.plan}</div>
+    </>
+  );
+}
+
+function GlossaryTab() {
+  const [items, setItems] = useState<GlossaryEntry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [src, setSrc] = useState('');
+  const [tgt, setTgt] = useState('');
+  const [srcLang, setSrcLang] = useState('vi');
+  const [tgtLang, setTgtLang] = useState('ru');
+  const [busy, setBusy] = useState(false);
+
+  const load = async (): Promise<void> => {
+    try {
+      const data = await listGlossary();
+      setItems(data);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const onAdd = async (): Promise<void> => {
+    if (!src.trim() || !tgt.trim()) return;
+    setBusy(true);
+    try {
+      await upsertGlossary({
+        source_text: src.trim(),
+        source_lang: srcLang,
+        target_text: tgt.trim(),
+        target_lang: tgtLang,
+      });
+      setSrc('');
+      setTgt('');
+      setAdding(false);
+      await load();
+    } catch (e) {
+      alert(`Ошибка: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDelete = async (id: number | undefined): Promise<void> => {
+    if (!id) return;
+    if (!confirm('Удалить запись?')) return;
+    try {
+      await deleteGlossary(id);
+      await load();
+    } catch (e) {
+      alert(`Ошибка: ${(e as Error).message}`);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ ...card, padding: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: items === null ? 0 : 8 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Свои переводы</div>
+          {!adding && (
+            <button onClick={() => setAdding(true)} style={btnTiny}>+ добавить</button>
+          )}
+        </div>
+        <div style={{ fontSize: 11, color: C.textDim, marginBottom: 8, lineHeight: 1.4 }}>
+          Принудительные замены имён, терминов. Например: «Anh Tuấn → брат Туан».
+        </div>
+
+        {adding && (
+          <div style={{ background: '#f8fafc', padding: 10, borderRadius: 8, marginBottom: 10 }}>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+              <select value={srcLang} onChange={(e) => setSrcLang(e.target.value)} style={selectInput}>
+                <option value="vi">VI</option>
+                <option value="en">EN</option>
+                <option value="ru">RU</option>
+                <option value="zh">ZH</option>
+                <option value="ja">JA</option>
+                <option value="ko">KO</option>
+                <option value="fr">FR</option>
+              </select>
+              <input
+                value={src}
+                onChange={(e) => setSrc(e.target.value)}
+                placeholder="Источник"
+                style={{ ...textInput, flex: 1 }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+              <select value={tgtLang} onChange={(e) => setTgtLang(e.target.value)} style={selectInput}>
+                <option value="ru">RU</option>
+                <option value="en">EN</option>
+                <option value="vi">VI</option>
+                <option value="zh">ZH</option>
+                <option value="ja">JA</option>
+                <option value="ko">KO</option>
+                <option value="fr">FR</option>
+              </select>
+              <input
+                value={tgt}
+                onChange={(e) => setTgt(e.target.value)}
+                placeholder="Замена"
+                style={{ ...textInput, flex: 1 }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+              <button onClick={() => setAdding(false)} style={btnTiny} disabled={busy}>Отмена</button>
+              <button onClick={onAdd} style={btnTinyPrimary} disabled={busy || !src.trim() || !tgt.trim()}>
+                {busy ? '…' : 'Сохранить'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {items === null && !error && <div style={{ color: C.textMuted, fontSize: 12 }}>Загрузка…</div>}
+        {error && <div style={{ color: '#b91c1c', fontSize: 12 }}>Ошибка: {error}</div>}
+        {items && items.length === 0 && !adding && (
+          <div style={{ color: C.textDim, fontSize: 12, padding: '8px 0', textAlign: 'center' }}>
+            Пока пусто
+          </div>
+        )}
+        {items && items.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {items.map((g) => (
+              <div key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px', borderBottom: `1px solid ${C.divider}`, fontSize: 12 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: C.text, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <span style={{ color: C.textDim, fontSize: 10, fontWeight: 700, marginRight: 4 }}>{g.source_lang.toUpperCase()}</span>
+                    {g.source_text}
+                  </div>
+                  <div style={{ color: '#1d4ed8', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <span style={{ color: C.textDim, fontSize: 10, fontWeight: 700, marginRight: 4 }}>→ {g.target_lang.toUpperCase()}</span>
+                    {g.target_text}
+                  </div>
+                </div>
+                <button onClick={() => onDelete(g.id)} style={btnDelete} title="Удалить">×</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -286,6 +478,29 @@ const brandTagline: React.CSSProperties = {
   marginTop: 2,
 };
 
+const tabBar: React.CSSProperties = {
+  display: 'flex',
+  gap: 4,
+  marginTop: 14,
+  background: C.divider,
+  padding: 3,
+  borderRadius: 8,
+};
+
+const tabBtn = (active: boolean): React.CSSProperties => ({
+  flex: 1,
+  padding: '7px 10px',
+  background: active ? C.card : 'transparent',
+  color: active ? C.text : C.textMuted,
+  border: 0,
+  borderRadius: 6,
+  cursor: 'pointer',
+  fontSize: 12,
+  fontWeight: 600,
+  boxShadow: active ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
+  transition: 'all 0.12s ease',
+});
+
 const avatarFallback: React.CSSProperties = {
   width: 40,
   height: 40,
@@ -321,7 +536,6 @@ const btnPrimary: React.CSSProperties = {
   cursor: 'pointer',
   fontSize: 14,
   fontWeight: 500,
-  transition: 'background 0.15s ease',
 };
 
 const btnGhost: React.CSSProperties = {
@@ -337,11 +551,65 @@ const btnGhost: React.CSSProperties = {
   fontWeight: 500,
 };
 
+const btnTiny: React.CSSProperties = {
+  padding: '5px 10px',
+  fontSize: 11,
+  background: C.card,
+  color: C.textMuted,
+  border: `1px solid ${C.cardBorder}`,
+  borderRadius: 6,
+  cursor: 'pointer',
+};
+
+const btnTinyPrimary: React.CSSProperties = {
+  ...btnTiny,
+  background: C.accent,
+  color: '#fff',
+  borderColor: C.accent,
+};
+
+const btnDelete: React.CSSProperties = {
+  flex: '0 0 auto',
+  width: 22,
+  height: 22,
+  border: 0,
+  background: 'transparent',
+  color: C.textDim,
+  cursor: 'pointer',
+  borderRadius: 4,
+  fontSize: 16,
+  lineHeight: 1,
+};
+
 const subtleLink: React.CSSProperties = {
   fontSize: 11,
   color: C.textMuted,
   cursor: 'pointer',
   textDecoration: 'underline',
+};
+
+const textInput: React.CSSProperties = {
+  padding: '6px 8px',
+  border: `1px solid ${C.cardBorder}`,
+  borderRadius: 6,
+  fontSize: 12,
+  fontFamily: 'inherit',
+  outline: 'none',
+  background: '#fff',
+  color: C.text,
+};
+
+const selectInput: React.CSSProperties = {
+  padding: '6px 4px',
+  border: `1px solid ${C.cardBorder}`,
+  borderRadius: 6,
+  fontSize: 11,
+  fontFamily: 'inherit',
+  outline: 'none',
+  background: '#fff',
+  color: C.text,
+  flex: '0 0 auto',
+  width: 50,
 };
 
 const footer: React.CSSProperties = {

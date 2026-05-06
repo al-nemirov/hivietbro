@@ -2,12 +2,14 @@
 // Селекторы разведаны 2026-05-06, см. docs/zalo-dom.md
 
 import type { PlasmoCSConfig } from 'plasmo';
+import { Storage } from '@plasmohq/storage';
 import { translate as apiTranslate } from '../lib/api';
 import { getToken, isEnabled } from '../lib/storage';
 import { cacheGet, cacheSet } from '../lib/cache-client';
 import {
   getOrInitChatSettings,
   setChatSettings,
+  migrateChatSettings,
   SUPPORTED_PARTNER_LANGS,
   type ChatSettings,
 } from '../lib/chat-settings';
@@ -35,6 +37,13 @@ const OVERLAY_CLASS = 'zb-overlay';
 const OVERLAY_DATA_ATTR = 'data-zb-msg-id';
 const STATUS_CLASS = 'zb-status';
 const CHIP_CLASS = 'zb-chip';
+const TOOLTIP_CLASS = 'zb-tooltip';
+const PREVIEW_CLASS = 'zb-preview';
+
+const STORAGE_CHIP_POSITION = 'zb_chip_position';
+const STORAGE_ONBOARD_SEEN = 'zb_onboard_seen';
+
+const localStorage_ = new Storage();
 
 let attachedMsgRoot: Element | null = null;
 let msgObserver: MutationObserver | null = null;
@@ -42,6 +51,7 @@ let translationInFlight = false;
 let outgoingHandlersAttached = false;
 
 let currentChatKey: string | null = null;
+let currentChatDisplayName: string | null = null;
 let currentChatSettings: ChatSettings | null = null;
 
 const pending = new Map<string, Promise<string>>();
@@ -75,6 +85,10 @@ function injectStyles(): void {
       from { opacity: 0; transform: translateY(6px) scale(0.97); }
       to { opacity: 1; transform: translateY(0) scale(1); }
     }
+    @keyframes zb-bounce {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-4px); }
+    }
 
     .${OVERLAY_CLASS} {
       display: block;
@@ -90,7 +104,10 @@ function injectStyles(): void {
       word-break: break-word;
       animation: zb-fade-in 0.2s ease-out;
       position: relative;
+      cursor: pointer;
+      transition: background 0.12s ease;
     }
+    .${OVERLAY_CLASS}:hover { background: rgba(64, 130, 255, 0.05); }
     .${OVERLAY_CLASS}::before {
       content: 'RU';
       position: absolute;
@@ -103,6 +120,11 @@ function injectStyles(): void {
       opacity: 0.6;
       pointer-events: none;
     }
+    .${OVERLAY_CLASS}[data-mode="original"] {
+      color: #475569;
+      font-style: italic;
+    }
+    .${OVERLAY_CLASS}[data-mode="original"]::before { content: 'ORIG'; }
     .${OVERLAY_CLASS}[data-loading="1"] {
       animation: zb-pulse 1.2s ease-in-out infinite;
       color: #94a3b8;
@@ -149,7 +171,7 @@ function injectStyles(): void {
     .${STATUS_CLASS}--success .${STATUS_CLASS}__dot { background: #10b981; animation: none; }
     .${STATUS_CLASS}--error .${STATUS_CLASS}__dot { background: #fca5a5; animation: none; }
 
-    /* Floating chip — управление переводом для текущего чата */
+    /* Floating chip — draggable */
     .${CHIP_CLASS} {
       position: fixed;
       right: 20px;
@@ -157,6 +179,8 @@ function injectStyles(): void {
       z-index: 999997;
       font: 500 12.5px/1.2 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       animation: zb-pop 0.18s ease-out;
+      touch-action: none;
+      user-select: none;
     }
     .${CHIP_CLASS}__btn {
       display: inline-flex;
@@ -167,18 +191,16 @@ function injectStyles(): void {
       border: 1px solid #e6e8ec;
       border-radius: 22px;
       box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05);
-      cursor: pointer;
+      cursor: grab;
       color: #1a1d24;
-      transition: all 0.15s ease;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
       font: inherit;
     }
     .${CHIP_CLASS}__btn:hover { border-color: #4082ff; box-shadow: 0 4px 20px rgba(64, 130, 255, 0.18); }
+    .${CHIP_CLASS}--dragging .${CHIP_CLASS}__btn { cursor: grabbing; box-shadow: 0 8px 28px rgba(64, 130, 255, 0.25); }
     .${CHIP_CLASS}__dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #cbd5e1;
-      flex: 0 0 auto;
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #cbd5e1; flex: 0 0 auto;
     }
     .${CHIP_CLASS}--on .${CHIP_CLASS}__dot { background: #10b981; }
     .${CHIP_CLASS}--on .${CHIP_CLASS}__btn { border-color: #d1ddf4; background: #f7faff; }
@@ -187,8 +209,6 @@ function injectStyles(): void {
 
     .${CHIP_CLASS}__menu {
       position: absolute;
-      right: 0;
-      bottom: calc(100% + 8px);
       width: 240px;
       background: #fff;
       border: 1px solid #e6e8ec;
@@ -198,88 +218,136 @@ function injectStyles(): void {
       animation: zb-pop 0.15s ease-out;
     }
     .${CHIP_CLASS}__menu-header {
-      font-size: 10px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: #94a3b8;
-      padding: 4px 6px 6px;
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.5px; color: #94a3b8; padding: 4px 6px 6px;
     }
     .${CHIP_CLASS}__row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 8px 6px;
-      cursor: pointer;
-      border-radius: 6px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 6px; cursor: pointer; border-radius: 6px;
     }
     .${CHIP_CLASS}__row:hover { background: #f8fafc; }
     .${CHIP_CLASS}__row strong { color: #1a1d24; font-weight: 500; }
     .${CHIP_CLASS}__chat-name {
-      font-size: 11px;
-      color: #94a3b8;
-      padding: 0 6px 6px;
-      max-width: 220px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      font-size: 11px; color: #94a3b8; padding: 0 6px 6px;
+      max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .${CHIP_CLASS}__divider { height: 1px; background: #f0f2f5; margin: 6px -10px; }
     .${CHIP_CLASS}__lang-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 6px;
-      cursor: pointer;
-      border-radius: 6px;
-      color: #1a1d24;
+      display: flex; align-items: center; gap: 8px; padding: 8px 6px;
+      cursor: pointer; border-radius: 6px; color: #1a1d24;
     }
     .${CHIP_CLASS}__lang-row:hover { background: #f8fafc; }
     .${CHIP_CLASS}__lang-row--active {
-      background: #e8f0ff;
-      color: #1d4ed8;
-      font-weight: 600;
+      background: #e8f0ff; color: #1d4ed8; font-weight: 600;
     }
-    .${CHIP_CLASS}__lang-row--active:hover { background: #dde8ff; }
     .${CHIP_CLASS}__lang-tag {
-      flex: 0 0 28px;
-      font-weight: 700;
-      font-size: 11px;
-      letter-spacing: 0.4px;
-      color: #4082ff;
-      padding: 3px 0;
-      text-align: center;
-      border: 1px solid #d1ddf4;
-      background: #f0f7ff;
-      border-radius: 4px;
+      flex: 0 0 28px; font-weight: 700; font-size: 11px; letter-spacing: 0.4px;
+      color: #4082ff; padding: 3px 0; text-align: center;
+      border: 1px solid #d1ddf4; background: #f0f7ff; border-radius: 4px;
     }
-
     .${CHIP_CLASS}__switch {
-      position: relative;
-      width: 36px;
-      height: 20px;
-      background: #cbd5e1;
-      border-radius: 10px;
-      border: 0;
-      padding: 0;
-      cursor: pointer;
-      transition: background 0.15s ease;
-      flex: 0 0 auto;
+      position: relative; width: 36px; height: 20px;
+      background: #cbd5e1; border-radius: 10px;
+      border: 0; padding: 0; cursor: pointer;
+      transition: background 0.15s ease; flex: 0 0 auto;
     }
     .${CHIP_CLASS}__switch::after {
-      content: '';
-      position: absolute;
-      top: 2px;
-      left: 2px;
-      width: 16px;
-      height: 16px;
-      border-radius: 8px;
-      background: #fff;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+      content: ''; position: absolute; top: 2px; left: 2px;
+      width: 16px; height: 16px; border-radius: 8px;
+      background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.2);
       transition: left 0.15s ease;
     }
     .${CHIP_CLASS}__switch[data-on="1"] { background: #10b981; }
     .${CHIP_CLASS}__switch[data-on="1"]::after { left: 18px; }
+    .${CHIP_CLASS}__hint {
+      font-size: 10px; color: #94a3b8;
+      padding: 0 6px 4px; line-height: 1.3;
+    }
+
+    /* Onboarding tooltip */
+    .${TOOLTIP_CLASS} {
+      position: fixed;
+      background: #1a1d24;
+      color: #fff;
+      padding: 10px 14px;
+      border-radius: 10px;
+      font: 500 12.5px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+      z-index: 999996;
+      max-width: 240px;
+      animation: zb-bounce 1.6s ease-in-out infinite;
+      pointer-events: auto;
+    }
+    .${TOOLTIP_CLASS}::after {
+      content: '';
+      position: absolute;
+      bottom: -8px;
+      right: 24px;
+      width: 0; height: 0;
+      border-left: 8px solid transparent;
+      border-right: 8px solid transparent;
+      border-top: 8px solid #1a1d24;
+    }
+    .${TOOLTIP_CLASS}__close {
+      display: inline-block;
+      margin-top: 6px;
+      font-size: 11px;
+      color: #93c5fd;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+
+    /* Outgoing preview */
+    .${PREVIEW_CLASS} {
+      position: fixed;
+      bottom: 100px;
+      left: 50%;
+      transform: translateX(-50%);
+      max-width: 480px;
+      width: calc(100vw - 60px);
+      background: rgba(26, 29, 36, 0.96);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      color: #fff;
+      padding: 14px 16px;
+      border-radius: 12px;
+      font: 13px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.25);
+      z-index: 999998;
+      animation: zb-pop 0.15s ease-out;
+    }
+    .${PREVIEW_CLASS}__label {
+      font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+      color: #93c5fd; text-transform: uppercase; margin-bottom: 4px;
+    }
+    .${PREVIEW_CLASS}__text {
+      font-size: 14px; line-height: 1.5; word-break: break-word;
+      white-space: pre-wrap;
+    }
+    .${PREVIEW_CLASS}__row {
+      margin-top: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .${PREVIEW_CLASS}__hint {
+      font-size: 11px; color: #94a3b8;
+    }
+    .${PREVIEW_CLASS}__btn {
+      padding: 6px 12px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.05);
+      color: #fff;
+      border-radius: 6px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+    }
+    .${PREVIEW_CLASS}__btn--primary {
+      background: #4082ff; border-color: #4082ff;
+    }
+    .${PREVIEW_CLASS}__btn--primary:hover { background: #2a6bea; }
   `;
   const style = document.createElement('style');
   style.id = 'zb-styles';
@@ -304,21 +372,51 @@ function extractText(bubble: Element): string {
   return (t?.textContent ?? '').trim();
 }
 
-function getChatKey(): string | null {
-  const input = document.querySelector(SEL.inputField) as HTMLElement | null;
-  return input?.dataset?.trailer || null;
+/** Извлекает стабильный contactId из qid. Формат: <id>@<msgId>... или <id>_xxx@... */
+function extractContactIdFromQid(qid: string): string | null {
+  const m = qid.match(/^(\d+)/);
+  return m ? m[1] : null;
 }
 
-async function loadCurrentChatSettings(force = false): Promise<void> {
-  const k = getChatKey();
-  if (!k) {
+/**
+ * Находит стабильный chat key:
+ *   - data-qid префикс ANY видимого баббла (стабильный contactId Zalo)
+ *   - fallback: data-trailer (имя контакта; для пустых чатов)
+ */
+function findChatKey(): { key: string | null; displayName: string | null } {
+  const input = document.querySelector(SEL.inputField) as HTMLElement | null;
+  const trailer = input?.dataset?.trailer ?? null;
+
+  // Найти любой data-qid на видимых баблах
+  const anyQidEl = document.querySelector(`${SEL.messageBubble} ${QID_HOST_SELECTOR}`);
+  const qid = anyQidEl?.getAttribute('data-qid');
+  const contactId = qid ? extractContactIdFromQid(qid) : null;
+
+  if (contactId) return { key: `c:${contactId}`, displayName: trailer };
+  if (trailer) return { key: `t:${trailer}`, displayName: trailer };
+  return { key: null, displayName: null };
+}
+
+async function loadCurrentChatSettings(): Promise<void> {
+  const { key, displayName } = findChatKey();
+  if (!key) {
     currentChatKey = null;
+    currentChatDisplayName = null;
     currentChatSettings = null;
     return;
   }
-  if (!force && k === currentChatKey && currentChatSettings) return;
-  currentChatKey = k;
-  currentChatSettings = await getOrInitChatSettings(k, k);
+  if (key === currentChatKey && currentChatSettings) return;
+
+  currentChatKey = key;
+  currentChatDisplayName = displayName ?? key;
+
+  // Миграция: если у нас новый ключ "c:<id>" но настройки лежат под старым "t:<trailer>"
+  if (key.startsWith('c:') && displayName) {
+    const oldKey = `t:${displayName}`;
+    await migrateChatSettings(key, oldKey);
+  }
+
+  currentChatSettings = await getOrInitChatSettings(key, displayName ?? undefined);
 }
 
 async function processBubble(bubble: Element): Promise<void> {
@@ -339,14 +437,30 @@ async function processBubble(bubble: Element): Promise<void> {
   const overlay = document.createElement('div');
   overlay.className = OVERLAY_CLASS;
   overlay.dataset.loading = '1';
+  overlay.dataset.mode = 'translation';
+  overlay.dataset.original = text;
   overlay.setAttribute(OVERLAY_DATA_ATTR, qid);
   overlay.textContent = '…';
+  // toggle original on click
+  overlay.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const cur = overlay.dataset.mode ?? 'translation';
+    if (cur === 'translation') {
+      overlay.dataset.savedTranslation = overlay.textContent ?? '';
+      overlay.dataset.mode = 'original';
+      overlay.textContent = overlay.dataset.original ?? '';
+    } else {
+      overlay.dataset.mode = 'translation';
+      overlay.textContent = overlay.dataset.savedTranslation ?? overlay.textContent ?? '';
+    }
+  });
   target.appendChild(overlay);
 
   try {
     const cached = await cacheGet(qid, srcLang, tgtLang);
     if (cached && cached.src_text === text) {
       overlay.textContent = cached.tgt_text;
+      overlay.dataset.savedTranslation = cached.tgt_text;
       overlay.dataset.loading = '0';
       return;
     }
@@ -382,6 +496,7 @@ async function processBubble(bubble: Element): Promise<void> {
     }
 
     overlay.textContent = translation;
+    overlay.dataset.savedTranslation = translation;
     overlay.dataset.loading = '0';
   } catch (err) {
     overlay.dataset.error = '1';
@@ -393,7 +508,6 @@ async function processBubble(bubble: Element): Promise<void> {
 function rescanVisibleMessages(): void {
   if (!attachedMsgRoot) return;
   if (!currentChatSettings?.enabled) {
-    // выключили — сносим все наши overlay'и в этом скролле
     attachedMsgRoot.querySelectorAll(`.${OVERLAY_CLASS}`).forEach((el) => el.remove());
     return;
   }
@@ -424,7 +538,7 @@ function attachMessageObserver(root: Element): void {
   msgObserver.observe(root, { childList: true, subtree: true });
 }
 
-// ===== FLOATING CHIP ========================================================
+// ===== FLOATING CHIP (DRAGGABLE) ============================================
 
 function ensureChip(): HTMLElement {
   let chip = document.querySelector(`.${CHIP_CLASS}`) as HTMLElement | null;
@@ -432,7 +546,77 @@ function ensureChip(): HTMLElement {
   chip = document.createElement('div');
   chip.className = CHIP_CLASS;
   document.body.appendChild(chip);
+  void restoreChipPosition(chip);
   return chip;
+}
+
+async function restoreChipPosition(chip: HTMLElement): Promise<void> {
+  const pos = await localStorage_.get<{ left: number; top: number }>(STORAGE_CHIP_POSITION);
+  if (!pos) return;
+  // clamp to viewport
+  const left = Math.max(0, Math.min(window.innerWidth - 200, pos.left));
+  const top = Math.max(0, Math.min(window.innerHeight - 50, pos.top));
+  chip.style.left = `${left}px`;
+  chip.style.top = `${top}px`;
+  chip.style.right = 'auto';
+  chip.style.bottom = 'auto';
+}
+
+function attachDragHandlers(chip: HTMLElement): void {
+  const btn = chip.querySelector(`.${CHIP_CLASS}__btn`) as HTMLElement | null;
+  if (!btn || btn.dataset.zbDrag === '1') return;
+  btn.dataset.zbDrag = '1';
+
+  let dragStart: { x: number; y: number; startLeft: number; startTop: number } | null = null;
+  let isDragging = false;
+
+  btn.addEventListener('pointerdown', (e: PointerEvent) => {
+    if (e.button !== 0) return;
+    const rect = chip.getBoundingClientRect();
+    dragStart = { x: e.clientX, y: e.clientY, startLeft: rect.left, startTop: rect.top };
+    isDragging = false;
+    btn.setPointerCapture(e.pointerId);
+  });
+
+  btn.addEventListener('pointermove', (e: PointerEvent) => {
+    if (!dragStart) return;
+    const dx = e.clientX - dragStart.x;
+    const dy = e.clientY - dragStart.y;
+    if (!isDragging && Math.hypot(dx, dy) > 5) {
+      isDragging = true;
+      chip.classList.add(`${CHIP_CLASS}--dragging`);
+      // переключаем с right/bottom на left/top
+      chip.style.right = 'auto';
+      chip.style.bottom = 'auto';
+    }
+    if (isDragging) {
+      const left = Math.max(0, Math.min(window.innerWidth - chip.offsetWidth, dragStart.startLeft + dx));
+      const top = Math.max(0, Math.min(window.innerHeight - chip.offsetHeight, dragStart.startTop + dy));
+      chip.style.left = `${left}px`;
+      chip.style.top = `${top}px`;
+    }
+  });
+
+  btn.addEventListener('pointerup', async (e: PointerEvent) => {
+    if (!dragStart) return;
+    btn.releasePointerCapture(e.pointerId);
+    if (isDragging) {
+      const rect = chip.getBoundingClientRect();
+      await localStorage_.set(STORAGE_CHIP_POSITION, { left: rect.left, top: rect.top });
+      chip.classList.remove(`${CHIP_CLASS}--dragging`);
+    } else {
+      // Это был клик — открываем меню
+      toggleChipMenu(chip);
+    }
+    dragStart = null;
+    isDragging = false;
+  });
+
+  btn.addEventListener('pointercancel', () => {
+    dragStart = null;
+    isDragging = false;
+    chip.classList.remove(`${CHIP_CLASS}--dragging`);
+  });
 }
 
 function renderChip(): void {
@@ -451,7 +635,6 @@ function renderChip(): void {
   const langTag = langInfo?.flag ?? s.partner_lang.toUpperCase();
   const stateText = s.enabled ? 'перевод вкл' : 'перевод выкл';
 
-  // Не пересоздаём если просто меняется состояние — обновляем содержимое
   if (!chip.querySelector(`.${CHIP_CLASS}__btn`)) {
     chip.innerHTML = `
       <button class="${CHIP_CLASS}__btn" type="button" aria-label="Настройки перевода">
@@ -460,16 +643,15 @@ function renderChip(): void {
         <span class="${CHIP_CLASS}__state"></span>
       </button>
     `;
-    const btn = chip.querySelector(`.${CHIP_CLASS}__btn`) as HTMLElement;
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleChipMenu(chip);
-    });
+    attachDragHandlers(chip);
   }
   const langEl = chip.querySelector(`.${CHIP_CLASS}__lang`);
   const stateEl = chip.querySelector(`.${CHIP_CLASS}__state`);
   if (langEl) langEl.textContent = langTag;
   if (stateEl) stateEl.textContent = stateText;
+
+  // онбординг — один раз показать стрелку
+  void maybeShowOnboarding(chip);
 }
 
 function toggleChipMenu(chip: HTMLElement): void {
@@ -485,6 +667,20 @@ function toggleChipMenu(chip: HTMLElement): void {
   const menu = document.createElement('div');
   menu.className = `${CHIP_CLASS}__menu`;
 
+  // Решаем где раскрыть меню (вверх или вниз — в зависимости от позиции чипа)
+  const chipRect = chip.getBoundingClientRect();
+  if (chipRect.top > window.innerHeight / 2) {
+    menu.style.bottom = `calc(100% + 8px)`;
+  } else {
+    menu.style.top = `calc(100% + 8px)`;
+  }
+  // По горизонтали — выравниваем по правому краю чипа, но если близко к левому краю — по левому
+  if (chipRect.left < 200) {
+    menu.style.left = '0';
+  } else {
+    menu.style.right = '0';
+  }
+
   const langOptions = SUPPORTED_PARTNER_LANGS.map(
     (lang) => `
     <div class="${CHIP_CLASS}__lang-row${lang.code === s.partner_lang ? ` ${CHIP_CLASS}__lang-row--active` : ''}" data-lang="${lang.code}">
@@ -495,7 +691,7 @@ function toggleChipMenu(chip: HTMLElement): void {
   ).join('');
 
   menu.innerHTML = `
-    <div class="${CHIP_CLASS}__chat-name">${escapeHtml(currentChatKey ?? '')}</div>
+    <div class="${CHIP_CLASS}__chat-name">${escapeHtml(currentChatDisplayName ?? currentChatKey ?? '')}</div>
     <div class="${CHIP_CLASS}__row" data-action="toggle">
       <strong>Перевод включён</strong>
       <button class="${CHIP_CLASS}__switch" type="button" data-on="${s.enabled ? '1' : '0'}"></button>
@@ -503,11 +699,12 @@ function toggleChipMenu(chip: HTMLElement): void {
     <div class="${CHIP_CLASS}__divider"></div>
     <div class="${CHIP_CLASS}__menu-header">Партнёр говорит на</div>
     ${langOptions}
+    <div class="${CHIP_CLASS}__divider"></div>
+    <div class="${CHIP_CLASS}__hint">Чтобы переместить — потяни иконку. Клик по переводу — показать оригинал.</div>
   `;
 
   chip.appendChild(menu);
 
-  // Toggle handler
   const toggleRow = menu.querySelector(`[data-action="toggle"]`) as HTMLElement;
   toggleRow.addEventListener('click', async (e) => {
     e.stopPropagation();
@@ -520,7 +717,6 @@ function toggleChipMenu(chip: HTMLElement): void {
     rescanVisibleMessages();
   });
 
-  // Lang handlers
   menu.querySelectorAll(`[data-lang]`).forEach((row) => {
     row.addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -535,7 +731,6 @@ function toggleChipMenu(chip: HTMLElement): void {
     });
   });
 
-  // close on outside click
   const close = (ev: MouseEvent): void => {
     if (!menu.contains(ev.target as Node) && !chip.contains(ev.target as Node)) {
       menu.remove();
@@ -549,7 +744,35 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 }
 
-// ===== OUTGOING — перехват натуральной отправки ============================
+// ===== ONBOARDING ===========================================================
+
+async function maybeShowOnboarding(chip: HTMLElement): Promise<void> {
+  const seen = await localStorage_.get<boolean>(STORAGE_ONBOARD_SEEN);
+  if (seen) return;
+  if (document.querySelector(`.${TOOLTIP_CLASS}`)) return;
+
+  const tip = document.createElement('div');
+  tip.className = TOOLTIP_CLASS;
+  tip.innerHTML = `
+    <div>👇 Включи перевод для этого чата здесь.<br>Можно перетаскивать иконку куда удобно.</div>
+    <span class="${TOOLTIP_CLASS}__close">понятно</span>
+  `;
+  document.body.appendChild(tip);
+
+  // Position above the chip
+  const rect = chip.getBoundingClientRect();
+  tip.style.right = `${window.innerWidth - rect.right}px`;
+  tip.style.top = `${rect.top - tip.offsetHeight - 12}px`;
+
+  const close = async (): Promise<void> => {
+    tip.remove();
+    await localStorage_.set(STORAGE_ONBOARD_SEEN, true);
+  };
+  tip.querySelector(`.${TOOLTIP_CLASS}__close`)?.addEventListener('click', close);
+  setTimeout(close, 12_000);
+}
+
+// ===== OUTGOING — перехват + preview =======================================
 
 function getStatus(): HTMLElement {
   let el = document.querySelector(`.${STATUS_CLASS}`) as HTMLElement | null;
@@ -638,6 +861,17 @@ async function interceptAndSend(input: HTMLElement, ruText: string): Promise<voi
     const vi = result.translation;
     if (!vi) throw new Error('пустой перевод');
 
+    hideStatus();
+
+    // Показать preview, дать пользователю 1.8с на отмену через Esc
+    const confirmed = await showPreviewAndAwaitConfirm(ruText, vi);
+    if (!confirmed) {
+      // Пользователь отменил — оставляем оригинальный текст в инпуте
+      showStatus('Отменено', 'error');
+      setTimeout(hideStatus, 1500);
+      return;
+    }
+
     input.focus();
     document.execCommand('selectAll', false);
     document.execCommand('delete', false);
@@ -660,6 +894,55 @@ async function interceptAndSend(input: HTMLElement, ruText: string): Promise<voi
   }
 }
 
+const PREVIEW_AUTO_CONFIRM_MS = 1800;
+
+function showPreviewAndAwaitConfirm(srcText: string, tgtText: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    document.querySelector(`.${PREVIEW_CLASS}`)?.remove();
+    const panel = document.createElement('div');
+    panel.className = PREVIEW_CLASS;
+    panel.innerHTML = `
+      <div class="${PREVIEW_CLASS}__label">Будет отправлено</div>
+      <div class="${PREVIEW_CLASS}__text">${escapeHtml(tgtText)}</div>
+      <div class="${PREVIEW_CLASS}__row">
+        <span class="${PREVIEW_CLASS}__hint">Esc — отменить · Enter — отправить сейчас</span>
+        <div>
+          <button class="${PREVIEW_CLASS}__btn" data-act="cancel">Отменить</button>
+          <button class="${PREVIEW_CLASS}__btn ${PREVIEW_CLASS}__btn--primary" data-act="send">Отправить</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(panel);
+
+    let done = false;
+    const finish = (result: boolean): void => {
+      if (done) return;
+      done = true;
+      window.clearTimeout(autoTimer);
+      document.removeEventListener('keydown', onKey, true);
+      panel.remove();
+      resolve(result);
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        finish(false);
+      } else if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        finish(true);
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+
+    panel.querySelector('[data-act="cancel"]')?.addEventListener('click', () => finish(false));
+    panel.querySelector('[data-act="send"]')?.addEventListener('click', () => finish(true));
+
+    const autoTimer = window.setTimeout(() => finish(true), PREVIEW_AUTO_CONFIRM_MS);
+  });
+}
+
 // ===== ROOT WATCHER (debounced) ============================================
 
 function watchUI(): void {
@@ -670,7 +953,6 @@ function watchUI(): void {
     pendingTick = null;
     const msgRoot = document.querySelector(SEL.messageContainer);
 
-    // Если контейнера нет — чат не открыт. Скрываем chip, освобождаем observer.
     if (!msgRoot) {
       if (attachedMsgRoot) {
         attachedMsgRoot = null;
@@ -680,17 +962,17 @@ function watchUI(): void {
         }
       }
       currentChatKey = null;
+      currentChatDisplayName = null;
       currentChatSettings = null;
       lastChatKey = null;
       renderChip();
       return;
     }
 
-    const k = getChatKey();
-    const chatChanged = k !== lastChatKey;
-    if (chatChanged) {
-      lastChatKey = k;
-      await loadCurrentChatSettings(true);
+    const { key } = findChatKey();
+    if (key !== lastChatKey) {
+      lastChatKey = key;
+      await loadCurrentChatSettings();
     }
 
     if (msgRoot !== attachedMsgRoot) attachMessageObserver(msgRoot);
@@ -704,8 +986,6 @@ function watchUI(): void {
 
   void tick();
 
-  // Дебаунсим body-обзёрвер: 200мс достаточно для обнаружения смены чата,
-  // но Zalo's микро-мутации не вызывают тысячи tick'ов.
   const bodyObs = new MutationObserver(schedule);
   bodyObs.observe(document.body, { childList: true, subtree: true });
 }
