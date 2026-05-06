@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import logoUrl from 'data-base64:~assets/icon.png';
 import { getUser, isEnabled, setEnabled, clearAuth, type StoredUser } from './lib/storage';
 import { getUsage } from './lib/api';
 import { cacheClear, cacheStats } from './lib/cache-client';
@@ -109,7 +110,7 @@ function Popup() {
     return (
       <div style={shell}>
         <div style={brandBlock}>
-          <div style={brandIcon}>⇄</div>
+          <img src={logoUrl} alt="HiVietBro" style={brandIcon} />
           <div>
             <div style={brandName}>HiVietBro</div>
             <div style={brandTagline}>Перевод чата в реальном времени</div>
@@ -455,14 +456,8 @@ const brandIcon: React.CSSProperties = {
   width: 36,
   height: 36,
   borderRadius: 9,
-  background: `linear-gradient(135deg, ${C.accent} 0%, ${C.accentDark} 100%)`,
-  color: '#fff',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  fontSize: 13,
-  fontWeight: 700,
-  letterSpacing: -0.3,
+  display: 'block',
+  objectFit: 'contain',
 };
 
 const brandName: React.CSSProperties = {
