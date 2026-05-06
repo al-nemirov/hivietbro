@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { getUser, isEnabled, setEnabled, clearAuth, type StoredUser } from './lib/storage';
 import { getUsage } from './lib/api';
 import { DASHBOARD_URL } from './lib/config';
+import { cacheClear, cacheStats } from './lib/cache';
 
 interface Usage {
   messages: number;
@@ -13,13 +14,15 @@ function Popup() {
   const [user, setUser] = useState<StoredUser | null>(null);
   const [enabled, setEnabledState] = useState(true);
   const [usage, setUsageState] = useState<Usage | null>(null);
+  const [cacheCount, setCacheCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
-      const [u, e] = await Promise.all([getUser(), isEnabled()]);
+      const [u, e, stats] = await Promise.all([getUser(), isEnabled(), cacheStats()]);
       setUser(u);
       setEnabledState(e);
+      setCacheCount(stats.count);
       if (u) {
         try {
           const data = await getUsage();
@@ -40,7 +43,15 @@ function Popup() {
 
   const onLogout = async (): Promise<void> => {
     await clearAuth();
+    await cacheClear();
     setUser(null);
+    setCacheCount(0);
+  };
+
+  const onClearCache = async (): Promise<void> => {
+    if (!confirm('Очистить локальный кэш переводов? Старые сообщения будут переводиться заново.')) return;
+    await cacheClear();
+    setCacheCount(0);
   };
 
   const onLogin = (): void => {
@@ -86,6 +97,13 @@ function Popup() {
           {!user.is_admin && <div>Расход: ${usage.cost_usd.toFixed(4)}</div>}
         </div>
       )}
+
+      <div style={{ fontSize: 12, color: '#666', marginBottom: 12, padding: 8, background: '#f0f7ff', borderRadius: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>Локальный кэш: {cacheCount} переводов</span>
+        {cacheCount > 0 && (
+          <a onClick={onClearCache} style={{ fontSize: 11, color: '#4082ff', cursor: 'pointer', textDecoration: 'underline' }}>очистить</a>
+        )}
+      </div>
 
       <a href={`${DASHBOARD_URL}/account`} target="_blank" style={linkStyle}>Личный кабинет</a>
       <a href={`${DASHBOARD_URL}/glossary`} target="_blank" style={linkStyle}>Глоссарий</a>
