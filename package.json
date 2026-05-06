@@ -4,6 +4,7 @@
   "version": "0.0.1",
   "description": "Real-time перевод чата Zalo через Claude API. Ты пишешь по-русски — собеседник видит на вьетнамском, и наоборот.",
   "author": "Alexander Nemirov",
+  "license": "AGPL-3.0-or-later",
   "scripts": {
     "dev": "plasmo dev",
     "build": "plasmo build",
