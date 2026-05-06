@@ -3,6 +3,7 @@
 
 import type { PlasmoCSConfig } from 'plasmo';
 import { Storage } from '@plasmohq/storage';
+import LOGO_URL from 'data-base64:~assets/icon.png';
 import { translate as apiTranslate, pullChatsFromServer, pushChatsToServer } from '../lib/api';
 import { getToken, isEnabled } from '../lib/storage';
 import { cacheGet, cacheSet } from '../lib/cache-client';
@@ -326,13 +327,18 @@ function injectStyles(): void {
 
     .${CHIP_CLASS}__menu {
       position: absolute;
-      width: 240px;
+      width: 280px;
       background: #fff;
       border: 1px solid #e6e8ec;
       border-radius: 12px;
       box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.04);
       padding: 10px;
       animation: zb-pop 0.15s ease-out;
+    }
+    .${CHIP_CLASS}__lang-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2px;
     }
     .${CHIP_CLASS}__menu-header {
       font-size: 10px; font-weight: 700; text-transform: uppercase;
@@ -833,12 +839,12 @@ function toggleChipMenu(chip: HTMLElement): void {
     </div>
     <div class="${CHIP_CLASS}__divider"></div>
     <div class="${CHIP_CLASS}__menu-header">Я говорю на</div>
-    ${myOptions}
+    <div class="${CHIP_CLASS}__lang-grid">${myOptions}</div>
     <div class="${CHIP_CLASS}__divider"></div>
     <div class="${CHIP_CLASS}__menu-header">Партнёр говорит на</div>
-    ${partnerOptions}
+    <div class="${CHIP_CLASS}__lang-grid">${partnerOptions}</div>
     <div class="${CHIP_CLASS}__divider"></div>
-    <div class="${CHIP_CLASS}__hint">Чтобы переместить — потяни иконку. Клик по переводу — показать оригинал.</div>
+    <div class="${CHIP_CLASS}__hint">Перетащите иконку, чтобы переместить. Клик по переводу — показать оригинал.</div>
   `;
 
   chip.appendChild(menu);
@@ -905,25 +911,66 @@ function escapeHtml(s: string): string {
 
 // Локализованные сообщения интерфейса. Язык определяется по navigator.language;
 // fallback на ru.
-const I18N: Record<string, { onboardTitle: string; onboardTip: string; close: string }> = {
+interface I18nMsg {
+  onboardTitle: string;
+  onboardSubtitle: string;
+  step1: string;
+  step2: string;
+  step3: string;
+  tipLabel: string;
+  tipText: string;
+  startBtn: string;
+  arrowHint: string;
+  close: string;
+}
+
+const I18N: Record<string, I18nMsg> = {
   ru: {
-    onboardTitle: 'Включите перевод для этого чата здесь.',
-    onboardTip: 'Иконку можно перетащить в любое место. Совет: избегайте сложных идиом и игры слов — точность перевода выше у простых фраз.',
+    onboardTitle: 'Добро пожаловать в HiVietBro',
+    onboardSubtitle: 'Перевод чата в реальном времени',
+    step1: 'Найдите плавающую кнопку HiVietBro в углу — её можно перетащить куда удобно.',
+    step2: 'Кликните на кнопку, выберите свой язык и язык собеседника, включите перевод.',
+    step3: 'Пишите на родном языке — расширение само переведёт перед отправкой.',
+    tipLabel: 'Совет',
+    tipText: 'Избегайте сложных идиом и игры слов — точность перевода выше у простых, прямых фраз.',
+    startBtn: 'Начать',
+    arrowHint: 'Кнопка здесь →',
     close: 'понятно',
   },
   en: {
-    onboardTitle: 'Enable translation for this chat here.',
-    onboardTip: 'You can drag the icon anywhere. Tip: avoid heavy idioms and word-play — accuracy is higher for plain phrasing.',
+    onboardTitle: 'Welcome to HiVietBro',
+    onboardSubtitle: 'Real-time chat translation',
+    step1: 'Find the floating HiVietBro button in the corner — you can drag it anywhere.',
+    step2: 'Click the button, pick your language and the partner\'s language, enable translation.',
+    step3: 'Type in your native language — the extension will translate before sending.',
+    tipLabel: 'Tip',
+    tipText: 'Avoid heavy idioms and word-play — accuracy is higher for plain, direct phrasing.',
+    startBtn: 'Start',
+    arrowHint: 'Button is here →',
     close: 'got it',
   },
   ko: {
-    onboardTitle: '이 채팅의 번역을 여기서 활성화하세요.',
-    onboardTip: '아이콘은 원하는 위치로 드래그할 수 있습니다. 팁: 어려운 관용구나 말장난은 피하세요 — 단순한 표현일수록 번역 정확도가 높습니다.',
+    onboardTitle: 'HiVietBro에 오신 것을 환영합니다',
+    onboardSubtitle: '실시간 채팅 번역',
+    step1: '화면 모서리에서 떠 있는 HiVietBro 버튼을 찾으세요 — 원하는 위치로 드래그할 수 있습니다.',
+    step2: '버튼을 누르고, 본인 언어와 상대방 언어를 선택한 후 번역을 활성화하세요.',
+    step3: '모국어로 입력하시면, 확장 프로그램이 발신 전에 번역해 드립니다.',
+    tipLabel: '팁',
+    tipText: '어려운 관용구나 말장난은 피하세요 — 단순하고 직접적인 표현일수록 번역 정확도가 높습니다.',
+    startBtn: '시작',
+    arrowHint: '버튼이 여기 →',
     close: '확인',
   },
   vi: {
-    onboardTitle: 'Bật bản dịch cho cuộc trò chuyện này tại đây.',
-    onboardTip: 'Có thể kéo biểu tượng đến vị trí thuận tiện. Mẹo: tránh thành ngữ phức tạp và cách chơi chữ — bản dịch chính xác hơn với câu đơn giản.',
+    onboardTitle: 'Chào mừng đến với HiVietBro',
+    onboardSubtitle: 'Dịch chat thời gian thực',
+    step1: 'Tìm nút HiVietBro nổi ở góc màn hình — có thể kéo đến vị trí thuận tiện.',
+    step2: 'Nhấn vào nút, chọn ngôn ngữ của bạn và ngôn ngữ đối tác, bật bản dịch.',
+    step3: 'Nhập tin nhắn bằng ngôn ngữ mẹ đẻ — ứng dụng sẽ dịch trước khi gửi.',
+    tipLabel: 'Mẹo',
+    tipText: 'Tránh thành ngữ phức tạp và cách chơi chữ — câu đơn giản, trực tiếp sẽ được dịch chính xác hơn.',
+    startBtn: 'Bắt đầu',
+    arrowHint: 'Nút ở đây →',
     close: 'hiểu rồi',
   },
 };
@@ -939,29 +986,84 @@ function getUiLang(): string {
 async function maybeShowOnboarding(chip: HTMLElement): Promise<void> {
   const seen = await localStorage_.get<boolean>(STORAGE_ONBOARD_SEEN);
   if (seen) return;
-  if (document.querySelector(`.${TOOLTIP_CLASS}`)) return;
+  if (document.querySelector('.zb-tour-overlay')) return;
 
   const t = I18N[getUiLang()];
-  const tip = document.createElement('div');
-  tip.className = TOOLTIP_CLASS;
-  tip.innerHTML = `
-    <div><span style="display:inline-block;transform:translateY(2px);font-size:14px;margin-right:4px">↓</span>${escapeHtml(t.onboardTitle)}</div>
-    <div style="font-size:11.5px;opacity:0.85;margin-top:6px;line-height:1.45">${escapeHtml(t.onboardTip)}</div>
-    <span class="${TOOLTIP_CLASS}__close">${escapeHtml(t.close)}</span>
-  `;
-  document.body.appendChild(tip);
+  const chipRect = chip.getBoundingClientRect();
 
-  // Position above the chip
-  const rect = chip.getBoundingClientRect();
-  tip.style.right = `${window.innerWidth - rect.right}px`;
-  tip.style.top = `${rect.top - tip.offsetHeight - 12}px`;
+  // Затемнение фона (с прозрачным «окошком» вокруг чипа — он остаётся виден)
+  const overlay = document.createElement('div');
+  overlay.className = 'zb-tour-overlay';
+
+  // Карточка приветствия + шаги
+  const card = document.createElement('div');
+  card.className = 'zb-tour-card';
+  card.innerHTML = `
+    <img class="zb-tour-logo" src="${LOGO_URL}" alt="HiVietBro">
+    <div class="zb-tour-title">${escapeHtml(t.onboardTitle)}</div>
+    <div class="zb-tour-subtitle">${escapeHtml(t.onboardSubtitle)}</div>
+    <ol class="zb-tour-steps">
+      <li><span class="zb-tour-step-num">1</span><span>${escapeHtml(t.step1)}</span></li>
+      <li><span class="zb-tour-step-num">2</span><span>${escapeHtml(t.step2)}</span></li>
+      <li><span class="zb-tour-step-num">3</span><span>${escapeHtml(t.step3)}</span></li>
+    </ol>
+    <div class="zb-tour-tip"><strong>${escapeHtml(t.tipLabel)}.</strong> ${escapeHtml(t.tipText)}</div>
+    <button class="zb-tour-btn" type="button">${escapeHtml(t.startBtn)}</button>
+  `;
+
+  // Позиция карточки: слева/справа от чипа (там где больше места)
+  const placeOnLeft = chipRect.right > window.innerWidth / 2;
+  if (placeOnLeft) {
+    card.style.right = `${window.innerWidth - chipRect.left + 24}px`;
+  } else {
+    card.style.left = `${chipRect.right + 24}px`;
+  }
+  card.style.bottom = `${Math.max(40, window.innerHeight - chipRect.bottom - 30)}px`;
+
+  // SVG-стрелка от карточки к чипу
+  const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  arrow.setAttribute('class', 'zb-tour-arrow');
+  arrow.setAttribute('width', '120');
+  arrow.setAttribute('height', '80');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  if (placeOnLeft) {
+    arrow.style.right = `${window.innerWidth - chipRect.left + 8}px`;
+    arrow.style.bottom = `${window.innerHeight - chipRect.bottom + chipRect.height / 2 - 30}px`;
+    path.setAttribute('d', 'M 10 10 Q 60 30, 100 60');
+  } else {
+    arrow.style.left = `${chipRect.right + 8}px`;
+    arrow.style.bottom = `${window.innerHeight - chipRect.bottom + chipRect.height / 2 - 30}px`;
+    path.setAttribute('d', 'M 110 10 Q 60 30, 20 60');
+  }
+  path.setAttribute('stroke', '#fff');
+  path.setAttribute('stroke-width', '3');
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke-dasharray', '6 6');
+  path.setAttribute('stroke-linecap', 'round');
+  arrow.appendChild(path);
+
+  // Стрелка-наконечник
+  const head = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+  if (placeOnLeft) {
+    head.setAttribute('points', '95,55 105,65 95,67');
+  } else {
+    head.setAttribute('points', '25,55 15,65 25,67');
+  }
+  head.setAttribute('fill', '#fff');
+  arrow.appendChild(head);
+
+  document.body.appendChild(overlay);
+  document.body.appendChild(arrow);
+  document.body.appendChild(card);
 
   const close = async (): Promise<void> => {
-    tip.remove();
+    overlay.remove();
+    arrow.remove();
+    card.remove();
     await localStorage_.set(STORAGE_ONBOARD_SEEN, true);
   };
-  tip.querySelector(`.${TOOLTIP_CLASS}__close`)?.addEventListener('click', close);
-  setTimeout(close, 14_000);
+  overlay.addEventListener('click', close);
+  card.querySelector('.zb-tour-btn')?.addEventListener('click', close);
 }
 
 // ===== OUTGOING — перехват + preview =======================================
