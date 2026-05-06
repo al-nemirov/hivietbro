@@ -62,42 +62,104 @@ async function bootstrap(): Promise<void> {
 function injectStyles(): void {
   if (document.getElementById('zb-styles')) return;
   const css = `
+    @keyframes zb-fade-in {
+      from { opacity: 0; transform: translateY(-2px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes zb-pulse {
+      0%, 100% { opacity: 0.4; }
+      50% { opacity: 0.8; }
+    }
+    @keyframes zb-slide-up {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
     .${OVERLAY_CLASS} {
       display: block;
-      margin: 4px 0 0;
-      padding: 6px 10px;
-      background: rgba(64, 130, 255, 0.08);
-      border-left: 3px solid #4082ff;
-      border-radius: 4px;
-      font-size: 13px;
-      line-height: 1.4;
-      color: #1a3d8f;
+      margin: 3px 0 0;
+      padding: 5px 9px 5px 11px;
+      background: transparent;
+      border-left: 2px solid #4082ff;
+      border-radius: 0 4px 4px 0;
+      font-size: 12.5px;
+      line-height: 1.45;
+      color: #1d4ed8;
       white-space: pre-wrap;
       word-break: break-word;
+      animation: zb-fade-in 0.2s ease-out;
+      position: relative;
     }
-    .${OVERLAY_CLASS}[data-loading="1"] { opacity: 0.5; font-style: italic; }
+    .${OVERLAY_CLASS}::before {
+      content: 'RU';
+      position: absolute;
+      top: 4px;
+      right: 6px;
+      font-size: 8.5px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: #94a3b8;
+      opacity: 0.6;
+      pointer-events: none;
+    }
+    .${OVERLAY_CLASS}[data-loading="1"] {
+      animation: zb-pulse 1.2s ease-in-out infinite;
+      color: #94a3b8;
+      font-style: italic;
+    }
     .${OVERLAY_CLASS}[data-error="1"] {
-      background: rgba(255, 64, 64, 0.08);
-      border-left-color: #ff4040;
-      color: #8f1a1a;
+      border-left-color: #ef4444;
+      color: #b91c1c;
+      font-size: 11.5px;
     }
+    .${OVERLAY_CLASS}[data-error="1"]::before { content: 'ERR'; color: #ef4444; }
+
     .${STATUS_CLASS} {
       position: fixed;
-      bottom: 8px;
+      bottom: 16px;
       right: 16px;
-      padding: 6px 12px;
-      background: #4082ff;
+      padding: 8px 14px;
+      background: rgba(26, 29, 36, 0.92);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
       color: #fff;
-      border-radius: 16px;
-      font: 13px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      border-radius: 18px;
+      font: 500 12.5px/1.2 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      letter-spacing: 0.1px;
+      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18), 0 1px 3px rgba(0, 0, 0, 0.1);
       z-index: 99999;
       pointer-events: none;
       opacity: 0;
-      transition: opacity 0.15s ease;
+      transform: translateY(12px);
+      transition: opacity 0.18s ease, transform 0.18s ease;
+      max-width: 280px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
-    .${STATUS_CLASS}--show { opacity: 1; }
-    .${STATUS_CLASS}--error { background: #ff4040; }
+    .${STATUS_CLASS}--show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .${STATUS_CLASS}--error {
+      background: rgba(185, 28, 28, 0.95);
+    }
+    .${STATUS_CLASS}__dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #4082ff;
+      animation: zb-pulse 1s ease-in-out infinite;
+      flex: 0 0 auto;
+    }
+    .${STATUS_CLASS}--success .${STATUS_CLASS}__dot {
+      background: #10b981;
+      animation: none;
+    }
+    .${STATUS_CLASS}--error .${STATUS_CLASS}__dot {
+      background: #fca5a5;
+      animation: none;
+    }
   `;
   const style = document.createElement('style');
   style.id = 'zb-styles';
@@ -229,21 +291,30 @@ function getStatus(): HTMLElement {
   if (!el) {
     el = document.createElement('div');
     el.className = STATUS_CLASS;
+    el.innerHTML = `<span class="${STATUS_CLASS}__dot"></span><span class="${STATUS_CLASS}__text"></span>`;
     document.body.appendChild(el);
   }
   return el;
 }
 
-function showStatus(text: string, isError = false): void {
+type StatusVariant = 'progress' | 'success' | 'error';
+
+function showStatus(text: string, variant: StatusVariant = 'progress'): void {
   const el = getStatus();
-  el.textContent = text;
-  el.classList.toggle(`${STATUS_CLASS}--error`, isError);
+  const textEl = el.querySelector(`.${STATUS_CLASS}__text`);
+  if (textEl) textEl.textContent = text;
+  el.classList.toggle(`${STATUS_CLASS}--success`, variant === 'success');
+  el.classList.toggle(`${STATUS_CLASS}--error`, variant === 'error');
   el.classList.add(`${STATUS_CLASS}--show`);
 }
 
 function hideStatus(): void {
   const el = getStatus();
-  el.classList.remove(`${STATUS_CLASS}--show`, `${STATUS_CLASS}--error`);
+  el.classList.remove(
+    `${STATUS_CLASS}--show`,
+    `${STATUS_CLASS}--error`,
+    `${STATUS_CLASS}--success`
+  );
 }
 
 function attachOutgoingInterceptors(): void {
@@ -316,11 +387,11 @@ async function interceptAndSend(input: HTMLElement, ruText: string): Promise<voi
     if (!sendBtn) throw new Error('кнопка отправки не найдена');
     sendBtn.click();
 
-    showStatus('Отправлено ✓');
-    setTimeout(hideStatus, 800);
+    showStatus('Отправлено', 'success');
+    setTimeout(hideStatus, 1000);
   } catch (err) {
     console.error('[zalo-bridge] send failed:', err);
-    showStatus(`Ошибка: ${(err as Error).message}`, true);
+    showStatus(`Ошибка: ${(err as Error).message}`, 'error');
     setTimeout(hideStatus, 3500);
   } finally {
     translationInFlight = false;
