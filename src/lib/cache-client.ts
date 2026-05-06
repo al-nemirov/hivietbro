@@ -27,10 +27,26 @@ type Req = CacheGetRequest | CacheSetRequest | CacheClearRequest | CacheStatsReq
 
 function safeSend<T>(msg: Req): Promise<T | null> {
   return new Promise((resolve) => {
+    // Pre-check: если chrome.runtime.id отсутствует, контекст уже мёртв
+    try {
+      if (!chrome.runtime?.id) {
+        resolve(null);
+        return;
+      }
+    } catch {
+      resolve(null);
+      return;
+    }
+
     try {
       chrome.runtime.sendMessage(msg, (resp) => {
-        if (chrome.runtime.lastError) {
-          // 'Extension context invalidated' и пр. — content script от старой версии
+        try {
+          if (chrome.runtime.lastError) {
+            // 'Extension context invalidated' и пр. — content script от старой версии
+            resolve(null);
+            return;
+          }
+        } catch {
           resolve(null);
           return;
         }

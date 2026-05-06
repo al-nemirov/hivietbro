@@ -26,9 +26,31 @@ async function authedFetch(path: string, init: RequestInit = {}): Promise<Respon
 }
 
 export async function translate(input: TranslateInput): Promise<TranslateOutput> {
-  const r = await authedFetch('/translate', { method: 'POST', body: JSON.stringify(input) });
-  if (!r.ok) throw new Error(`translate ${r.status}: ${await r.text()}`);
-  return r.json();
+  // 1 retry на сетевые/5xx ошибки — чтобы транзитивный «Failed to fetch» не убил перевод
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = await authedFetch('/translate', { method: 'POST', body: JSON.stringify(input) });
+      if (r.status >= 500) {
+        lastErr = new Error(`translate ${r.status}`);
+        if (attempt === 0) {
+          await new Promise((res) => setTimeout(res, 600));
+          continue;
+        }
+      }
+      if (!r.ok) throw new Error(`translate ${r.status}: ${await r.text()}`);
+      return r.json();
+    } catch (e) {
+      lastErr = e;
+      // Сетевые ошибки (Failed to fetch) — повторяем один раз
+      if (attempt === 0) {
+        await new Promise((res) => setTimeout(res, 600));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('translate failed');
 }
 
 export async function getMe(): Promise<unknown> {

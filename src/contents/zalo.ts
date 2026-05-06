@@ -59,6 +59,63 @@ let currentChatSettings: ChatSettings | null = null;
 
 const pending = new Map<string, Promise<string>>();
 
+// ===== EXTENSION CONTEXT GUARD ==============================================
+// После reload'а расширения старый content script остаётся в открытой вкладке,
+// но все chrome.* API уже мёртвы. Без проверки получим спам "Extension context
+// invalidated" в консоли при каждом MutationObserver tick'е.
+
+let contextDead = false;
+
+function isContextValid(): boolean {
+  if (contextDead) return false;
+  try {
+    return !!chrome.runtime?.id;
+  } catch {
+    contextDead = true;
+    return false;
+  }
+}
+
+function markContextDead(): void {
+  if (contextDead) return;
+  contextDead = true;
+  console.info('[zalo-bridge] extension reloaded — content script disabled until page refresh');
+  // Отключаем все наши observers
+  if (msgObserver) {
+    try {
+      msgObserver.disconnect();
+    } catch {}
+    msgObserver = null;
+  }
+  if (bodyObserver) {
+    try {
+      bodyObserver.disconnect();
+    } catch {}
+    bodyObserver = null;
+  }
+  // Скрываем чип чтобы пользователь не пытался кликать на мертвый UI
+  const chip = document.querySelector(`.${CHIP_CLASS}`);
+  if (chip) (chip as HTMLElement).style.display = 'none';
+}
+
+// Перехватываем глобальные unhandled rejection и errors с этим текстом
+window.addEventListener('unhandledrejection', (ev: PromiseRejectionEvent) => {
+  const msg = (ev.reason instanceof Error ? ev.reason.message : String(ev.reason)) ?? '';
+  if (msg.includes('Extension context invalidated') || msg.includes('Extension context was invalidated')) {
+    ev.preventDefault();
+    markContextDead();
+  }
+});
+window.addEventListener('error', (ev: ErrorEvent) => {
+  const msg = ev.message ?? '';
+  if (msg.includes('Extension context invalidated') || msg.includes('Extension context was invalidated')) {
+    ev.preventDefault();
+    markContextDead();
+  }
+});
+
+let bodyObserver: MutationObserver | null = null;
+
 async function bootstrap(): Promise<void> {
   if (!(await isEnabled())) return;
   const token = await getToken();
@@ -479,6 +536,7 @@ async function loadCurrentChatSettings(): Promise<void> {
 }
 
 async function processBubble(bubble: Element): Promise<void> {
+  if (!isContextValid()) return;
   if (isOutgoing(bubble)) return;
   if (bubble.querySelector(`[${OVERLAY_DATA_ATTR}]`)) return;
   if (!currentChatSettings || !currentChatSettings.enabled) return;
@@ -1058,13 +1116,17 @@ function watchUI(): void {
 
   const schedule = (): void => {
     if (pendingTick !== null) return;
+    if (!isContextValid()) {
+      markContextDead();
+      return;
+    }
     pendingTick = window.setTimeout(() => void tick(), 200);
   };
 
   void tick();
 
-  const bodyObs = new MutationObserver(schedule);
-  bodyObs.observe(document.body, { childList: true, subtree: true });
+  bodyObserver = new MutationObserver(schedule);
+  bodyObserver.observe(document.body, { childList: true, subtree: true });
 }
 
 // ===== SERVER SYNC ==========================================================
