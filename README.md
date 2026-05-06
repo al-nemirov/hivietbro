@@ -1,4 +1,4 @@
-# Bridge — Chat Translation (browser extension)
+# HiVietBro — Chat Translation (browser extension)
 
 Open-source расширение, которое переводит твой чат на Zalo Web в реальном времени через Anthropic Claude API. Ты пишешь по-русски — собеседник видит на вьетнамском (или любом из 6 поддерживаемых языков). Входящие — автоматически переведены под оригиналом.
 

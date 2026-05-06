@@ -111,7 +111,7 @@ function Popup() {
         <div style={brandBlock}>
           <div style={brandIcon}>⇄</div>
           <div>
-            <div style={brandName}>Bridge</div>
+            <div style={brandName}>HiVietBro</div>
             <div style={brandTagline}>Перевод чата в реальном времени</div>
           </div>
         </div>
@@ -135,9 +135,9 @@ function Popup() {
   return (
     <div style={shell}>
       <div style={brandBlock}>
-        <div style={brandIcon}>ZB</div>
+        <div style={brandIcon}>⇄</div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={brandName}>Bridge</div>
+          <div style={brandName}>HiVietBro</div>
           <div style={brandTagline}>{user.partner_lang.toUpperCase()} ↔ {user.preferred_lang.toUpperCase()}</div>
         </div>
       </div>
