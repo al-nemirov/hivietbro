@@ -13,30 +13,22 @@ export const config: PlasmoCSConfig = {
 
 // === SELECTORS ==============================================================
 const SEL = {
-  // Скролл-контейнер сообщений активного чата
   messageContainer: '#messageViewScroll',
-  // Один баббл (исходящего или входящего сообщения)
   messageBubble: '[data-component="bubble-message"]',
-  // Текст сообщения внутри баббла
   messageText: '[data-component="message-text-content"]',
-  // Поле ввода (contenteditable)
   inputField: '#richInput',
-  // Кнопка отправки (видна только если инпут не пустой)
+  inputContent: '.chat-input-content',
   sendButton: '.send-msg-btn',
-  // Активный чат в сайдбаре
-  activeConvItem: '#conversationList .conv-item.selected',
 };
 
-// Outgoing помечен модификатором `me` на баббле
 const OUTGOING_CLASS = 'me';
-
-// Маркер сообщения с qid → используем как стабильный ID
 const QID_HOST_SELECTOR = '[data-component="message-content-view"]';
 // ============================================================================
 
 const PROCESSED_IDS = new Set<string>();
 const OVERLAY_CLASS = 'zb-overlay';
 const OVERLAY_DATA_ATTR = 'data-zb-msg-id';
+const STATUS_CLASS = 'zb-status';
 
 interface UserSettings {
   preferred_lang: string;
@@ -44,6 +36,10 @@ interface UserSettings {
 }
 
 let settings: UserSettings = { preferred_lang: 'ru', partner_lang: 'vi' };
+
+let messageObserverAttached = false;
+let translationInFlight = false;
+let outgoingHandlersAttached = false;
 
 async function bootstrap(): Promise<void> {
   if (!(await isEnabled())) return;
@@ -54,7 +50,9 @@ async function bootstrap(): Promise<void> {
   }
 
   injectStyles();
-  waitForChatAndAttach();
+  attachOutgoingInterceptors();
+  watchUI();
+  console.info('[zalo-bridge] active — incoming подсвечивается, outgoing переводится автоматически');
 }
 
 function injectStyles(): void {
@@ -73,15 +71,29 @@ function injectStyles(): void {
       white-space: pre-wrap;
       word-break: break-word;
     }
-    .${OVERLAY_CLASS}[data-loading="1"] {
-      opacity: 0.5;
-      font-style: italic;
-    }
+    .${OVERLAY_CLASS}[data-loading="1"] { opacity: 0.5; font-style: italic; }
     .${OVERLAY_CLASS}[data-error="1"] {
       background: rgba(255, 64, 64, 0.08);
       border-left-color: #ff4040;
       color: #8f1a1a;
     }
+    .${STATUS_CLASS} {
+      position: fixed;
+      bottom: 8px;
+      right: 16px;
+      padding: 6px 12px;
+      background: #4082ff;
+      color: #fff;
+      border-radius: 16px;
+      font: 13px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      z-index: 99999;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+    }
+    .${STATUS_CLASS}--show { opacity: 1; }
+    .${STATUS_CLASS}--error { background: #ff4040; }
   `;
   const style = document.createElement('style');
   style.id = 'zb-styles';
@@ -89,12 +101,13 @@ function injectStyles(): void {
   document.head.appendChild(style);
 }
 
+// ===== INCOMING (read) ======================================================
+
 function isOutgoing(bubble: Element): boolean {
   return bubble.classList.contains(OUTGOING_CLASS);
 }
 
 function getBubbleStableId(bubble: Element): string | null {
-  // Предпочитаем data-qid (стабильнее), fallback — id (bb_msg_id_<ts>)
   const qid = bubble.querySelector(QID_HOST_SELECTOR)?.getAttribute('data-qid');
   if (qid) return qid;
   return bubble.id || null;
@@ -106,7 +119,6 @@ function extractText(bubble: Element): string {
 }
 
 function getChatHash(): string | undefined {
-  // Используем имя собеседника из data-trailer у инпута — стабильно для 1-1
   const input = document.querySelector(SEL.inputField) as HTMLElement | null;
   return input?.dataset?.trailer || undefined;
 }
@@ -115,7 +127,6 @@ async function processBubble(bubble: Element): Promise<void> {
   const stableId = getBubbleStableId(bubble);
   if (!stableId) return;
   if (PROCESSED_IDS.has(stableId)) return;
-  // Если этот же баббл уже имеет overlay (после ремоунта react-virtualized) — не трогаем
   if (bubble.querySelector(`[${OVERLAY_DATA_ATTR}]`)) {
     PROCESSED_IDS.add(stableId);
     return;
@@ -124,15 +135,9 @@ async function processBubble(bubble: Element): Promise<void> {
 
   const text = extractText(bubble);
   if (!text) return;
-
-  // MVP: переводим только входящие
   if (isOutgoing(bubble)) return;
 
-  // Точка вставки overlay — внутрь .message-content-wrapper, под текст,
-  // но проще всего — в самый баббл `[data-component="bubble-message"]`,
-  // визуально под текстом сообщения
   const target = bubble.querySelector('.message-content-wrapper') ?? bubble;
-
   const overlay = document.createElement('div');
   overlay.className = OVERLAY_CLASS;
   overlay.dataset.loading = '1';
@@ -157,11 +162,10 @@ async function processBubble(bubble: Element): Promise<void> {
   }
 }
 
-function attachObserver(root: Element): void {
-  // Обработать уже отрисованные баблы
-  root.querySelectorAll(SEL.messageBubble).forEach((b) => {
-    void processBubble(b);
-  });
+function attachMessageObserver(root: Element): void {
+  if (messageObserverAttached) return;
+  messageObserverAttached = true;
+  root.querySelectorAll(SEL.messageBubble).forEach((b) => void processBubble(b));
 
   const obs = new MutationObserver((muts) => {
     for (const m of muts) {
@@ -170,39 +174,149 @@ function attachObserver(root: Element): void {
         if (n.matches(SEL.messageBubble)) {
           void processBubble(n);
         } else {
-          n.querySelectorAll?.(SEL.messageBubble).forEach((b) => {
-            void processBubble(b);
-          });
+          n.querySelectorAll?.(SEL.messageBubble).forEach((b) => void processBubble(b));
         }
       });
     }
   });
   obs.observe(root, { childList: true, subtree: true });
-  console.info('[zalo-bridge] observer attached');
+  console.info('[zalo-bridge] message observer attached');
 }
 
-function waitForChatAndAttach(): void {
-  // Zalo рендерит chat-area асинхронно после загрузки. Ждём появления контейнера.
-  const tryAttach = (): boolean => {
-    const root = document.querySelector(SEL.messageContainer);
-    if (root) {
-      attachObserver(root);
-      return true;
+// ===== OUTGOING — перехват натуральной отправки ============================
+
+function getStatus(): HTMLElement {
+  let el = document.querySelector(`.${STATUS_CLASS}`) as HTMLElement | null;
+  if (!el) {
+    el = document.createElement('div');
+    el.className = STATUS_CLASS;
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function showStatus(text: string, isError = false): void {
+  const el = getStatus();
+  el.textContent = text;
+  el.classList.toggle(`${STATUS_CLASS}--error`, isError);
+  el.classList.add(`${STATUS_CLASS}--show`);
+}
+
+function hideStatus(): void {
+  const el = getStatus();
+  el.classList.remove(`${STATUS_CLASS}--show`, `${STATUS_CLASS}--error`);
+}
+
+function attachOutgoingInterceptors(): void {
+  if (outgoingHandlersAttached) return;
+  outgoingHandlersAttached = true;
+
+  // Перехват Enter (без Shift) внутри #richInput
+  document.addEventListener(
+    'keydown',
+    (e) => {
+      if (translationInFlight) return;
+      if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+      const input = document.querySelector(SEL.inputField) as HTMLElement | null;
+      if (!input) return;
+      if (!input.contains(e.target as Node)) return;
+      const text = (input.textContent ?? '').trim();
+      if (!text) return; // пустой инпут — пропускаем нормально (Zalo проигнорирует)
+
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      void interceptAndSend(input, text);
+    },
+    true // capture phase, до Zalo
+  );
+
+  // Перехват клика по нативной кнопке отправки
+  document.addEventListener(
+    'click',
+    (e) => {
+      if (translationInFlight) return;
+      const btn = (e.target as Element)?.closest?.(SEL.sendButton) as HTMLElement | null;
+      if (!btn) return;
+      const input = document.querySelector(SEL.inputField) as HTMLElement | null;
+      if (!input) return;
+      const text = (input.textContent ?? '').trim();
+      if (!text) return;
+
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      void interceptAndSend(input, text);
+    },
+    true // capture phase
+  );
+
+  console.info('[zalo-bridge] outgoing interceptors attached');
+}
+
+async function interceptAndSend(input: HTMLElement, ruText: string): Promise<void> {
+  if (translationInFlight) return;
+  translationInFlight = true;
+  showStatus('Перевожу…');
+
+  try {
+    const result = await apiTranslate({
+      text: ruText,
+      source_lang: settings.preferred_lang,
+      target_lang: settings.partner_lang,
+      direction: 'outgoing',
+      chat_id: getChatHash(),
+    });
+    const vi = result.translation;
+    if (!vi) throw new Error('пустой перевод');
+
+    // Заменяем содержимое инпута на VI-перевод
+    input.focus();
+    document.execCommand('selectAll', false);
+    document.execCommand('delete', false);
+    document.execCommand('insertText', false, vi);
+
+    // Дать Zalo тик чтобы зарегистрировать ввод (модификатор empty снимается, send-btn становится активной)
+    await new Promise((r) => setTimeout(r, 80));
+
+    // Кликаем настоящую кнопку отправки. translationInFlight === true →
+    // наш capture-handler пропустит этот click мимо и его обработает Zalo.
+    const sendBtn = document.querySelector(SEL.sendButton) as HTMLElement | null;
+    if (!sendBtn) {
+      throw new Error('кнопка отправки не найдена');
     }
-    return false;
+    sendBtn.click();
+
+    showStatus('Отправлено ✓');
+    setTimeout(hideStatus, 800);
+  } catch (err) {
+    console.error('[zalo-bridge] send failed:', err);
+    showStatus(`Ошибка: ${(err as Error).message}`, true);
+    setTimeout(hideStatus, 3500);
+    // НЕ восстанавливаем русский текст — он остался в текстовом пуле клипбоарда юзера через Ctrl+Z
+    // (можно потом восстановить execCommand'ом insertText если попросят)
+  } finally {
+    translationInFlight = false;
+  }
+}
+
+// ===== ROOT WATCHER =========================================================
+
+function watchUI(): void {
+  const tryAttach = (): void => {
+    const msgRoot = document.querySelector(SEL.messageContainer);
+    if (msgRoot && !messageObserverAttached) attachMessageObserver(msgRoot);
   };
 
-  if (tryAttach()) return;
+  tryAttach();
 
-  // Watcher на body — ждём, когда #messageViewScroll появится
   const bodyObs = new MutationObserver(() => {
-    if (tryAttach()) bodyObs.disconnect();
+    const root = document.querySelector(SEL.messageContainer);
+    if (!root) {
+      // Чат закрыт/перерендерен — старый observer на отлетевшем узле, сбрасываем флаг
+      messageObserverAttached = false;
+    }
+    tryAttach();
   });
   bodyObs.observe(document.body, { childList: true, subtree: true });
-
-  // Также — на смену активного чата #messageViewScroll может пересоздаться,
-  // тогда нужен новый observer. Но это покроется тем же body-watcher'ом.
-  // (TODO: оптимизировать — не пересоздавать observer на каждом switch'е чата)
 }
 
 bootstrap().catch((e) => console.error('[zalo-bridge] bootstrap failed:', e));
