@@ -38,11 +38,34 @@ function key(chatKey: string): string {
   return PREFIX + chatKey;
 }
 
+/**
+ * Auto-detect user's native language from browser locale.
+ * Fallback to 'ru' if locale not in supported list.
+ */
+function detectUserPreferredLang(): string {
+  try {
+    const navLang = (navigator.language || 'ru').slice(0, 2).toLowerCase();
+    const supported = SUPPORTED_PREFERRED_LANGS.map((l) => l.code);
+    if (supported.includes(navLang)) return navLang;
+  } catch {}
+  return 'ru';
+}
+
+/**
+ * Default partner_lang based on user's preferred — если юзер вьетнамец, то
+ * партнёр скорее всего ru/en, а не сам vi.
+ */
+function defaultPartnerLang(preferredLang: string): string {
+  if (preferredLang === 'vi') return 'ru';
+  return 'vi';
+}
+
 export function defaultSettings(displayName?: string): ChatSettings {
+  const preferred = detectUserPreferredLang();
   return {
     enabled: false,
-    partner_lang: 'vi',
-    preferred_lang: 'ru',
+    partner_lang: defaultPartnerLang(preferred),
+    preferred_lang: preferred,
     display_name: displayName,
     updated_at: Date.now(),
   };

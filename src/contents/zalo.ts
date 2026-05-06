@@ -14,6 +14,7 @@ import {
   getLastSyncTs,
   setLastSyncTs,
   SUPPORTED_PARTNER_LANGS,
+  SUPPORTED_PREFERRED_LANGS,
   type ChatSettings,
 } from '../lib/chat-settings';
 
@@ -753,8 +754,11 @@ function renderChip(): void {
   chip.classList.toggle(`${CHIP_CLASS}--on`, !!s.enabled);
   chip.classList.toggle(`${CHIP_CLASS}--off`, !s.enabled);
 
-  const langInfo = SUPPORTED_PARTNER_LANGS.find((l) => l.code === s.partner_lang);
-  const langTag = langInfo?.flag ?? s.partner_lang.toUpperCase();
+  const partnerInfo = SUPPORTED_PARTNER_LANGS.find((l) => l.code === s.partner_lang);
+  const partnerTag = partnerInfo?.flag ?? s.partner_lang.toUpperCase();
+  const myInfo = SUPPORTED_PREFERRED_LANGS.find((l) => l.code === s.preferred_lang);
+  const myTag = (myInfo as { code: string; flag?: string })?.flag ?? s.preferred_lang.toUpperCase();
+  const langTag = `${partnerTag} ↔ ${myTag}`;
   const stateText = s.enabled ? 'перевод вкл' : 'перевод выкл';
 
   if (!chip.querySelector(`.${CHIP_CLASS}__btn`)) {
@@ -803,10 +807,19 @@ function toggleChipMenu(chip: HTMLElement): void {
     menu.style.right = '0';
   }
 
-  const langOptions = SUPPORTED_PARTNER_LANGS.map(
+  const partnerOptions = SUPPORTED_PARTNER_LANGS.map(
     (lang) => `
-    <div class="${CHIP_CLASS}__lang-row${lang.code === s.partner_lang ? ` ${CHIP_CLASS}__lang-row--active` : ''}" data-lang="${lang.code}">
+    <div class="${CHIP_CLASS}__lang-row${lang.code === s.partner_lang ? ` ${CHIP_CLASS}__lang-row--active` : ''}" data-partner-lang="${lang.code}">
       <span class="${CHIP_CLASS}__lang-tag">${lang.flag}</span>
+      <span>${lang.label}</span>
+    </div>
+  `
+  ).join('');
+
+  const myOptions = SUPPORTED_PREFERRED_LANGS.map(
+    (lang) => `
+    <div class="${CHIP_CLASS}__lang-row${lang.code === s.preferred_lang ? ` ${CHIP_CLASS}__lang-row--active` : ''}" data-my-lang="${lang.code}">
+      <span class="${CHIP_CLASS}__lang-tag">${lang.code.toUpperCase()}</span>
       <span>${lang.label}</span>
     </div>
   `
@@ -819,8 +832,11 @@ function toggleChipMenu(chip: HTMLElement): void {
       <button class="${CHIP_CLASS}__switch" type="button" data-on="${s.enabled ? '1' : '0'}"></button>
     </div>
     <div class="${CHIP_CLASS}__divider"></div>
+    <div class="${CHIP_CLASS}__menu-header">Я говорю на</div>
+    ${myOptions}
+    <div class="${CHIP_CLASS}__divider"></div>
     <div class="${CHIP_CLASS}__menu-header">Партнёр говорит на</div>
-    ${langOptions}
+    ${partnerOptions}
     <div class="${CHIP_CLASS}__divider"></div>
     <div class="${CHIP_CLASS}__hint">Чтобы переместить — потяни иконку. Клик по переводу — показать оригинал.</div>
   `;
@@ -840,13 +856,30 @@ function toggleChipMenu(chip: HTMLElement): void {
     rescanVisibleMessages();
   });
 
-  menu.querySelectorAll(`[data-lang]`).forEach((row) => {
+  // Партнёр
+  menu.querySelectorAll(`[data-partner-lang]`).forEach((row) => {
     row.addEventListener('click', async (e) => {
       e.stopPropagation();
-      const lang = (row as HTMLElement).dataset.lang;
+      const lang = (row as HTMLElement).dataset.partnerLang;
       if (!lang || !currentChatKey || !currentChatSettings) return;
       if (lang === currentChatSettings.partner_lang) return;
       currentChatSettings = { ...currentChatSettings, partner_lang: lang };
+      await setChatSettings(currentChatKey, currentChatSettings);
+      void syncToServer(currentChatKey, currentChatSettings);
+      menu.remove();
+      renderChip();
+      rescanVisibleMessages();
+    });
+  });
+
+  // Я
+  menu.querySelectorAll(`[data-my-lang]`).forEach((row) => {
+    row.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const lang = (row as HTMLElement).dataset.myLang;
+      if (!lang || !currentChatKey || !currentChatSettings) return;
+      if (lang === currentChatSettings.preferred_lang) return;
+      currentChatSettings = { ...currentChatSettings, preferred_lang: lang };
       await setChatSettings(currentChatKey, currentChatSettings);
       void syncToServer(currentChatKey, currentChatSettings);
       menu.remove();
