@@ -128,11 +128,22 @@ async function bootstrap(): Promise<void> {
 
   injectStyles();
   attachOutgoingInterceptors();
+
+  // Сначала синхронизация с сервером (await) — чтобы настройки активного
+  // чата уже были в chrome.storage до первого render'а чипа. Без этого
+  // чип может мелькнуть в дефолтном OFF до того как sync подтянет ON.
+  // Таймаут 3с чтобы не блокировать UI если сервер тормозит.
+  try {
+    await Promise.race([
+      syncFromServer(),
+      new Promise((res) => setTimeout(res, 3000)),
+    ]);
+  } catch (e) {
+    console.warn('[zalo-bridge] sync from server failed:', e);
+  }
+
   watchUI();
   console.info('[zalo-bridge] active');
-
-  // Async: подтянуть настройки чатов с сервера (в фоне, не блокируем bootstrap)
-  void syncFromServer().catch((e) => console.warn('[zalo-bridge] sync from server failed:', e));
 }
 
 // ===== LANGUAGE DETECTION ===================================================
@@ -1421,6 +1432,7 @@ async function syncFromServer(): Promise<void> {
   if (remote.length === 0) return;
 
   let maxTs = since;
+  let currentChatChanged = false;
   for (const r of remote) {
     if (r.updated_at > maxTs) maxTs = r.updated_at;
     const local = await getChatSettings(r.chat_key);
@@ -1433,10 +1445,24 @@ async function syncFromServer(): Promise<void> {
         display_name: r.display_name ?? undefined,
         updated_at: r.updated_at,
       });
+      if (r.chat_key === currentChatKey) currentChatChanged = true;
     }
   }
   await setLastSyncTs(maxTs);
   console.info(`[zalo-bridge] synced ${remote.length} chats from server`);
+
+  // КРИТИЧНО: если активный чат был обновлён сервером — перерисовать UI и
+  // запустить rescan видимых сообщений. Без этого чип остаётся в дефолтном
+  // OFF после первой загрузки, даже если на сервере enabled=true.
+  if (currentChatChanged && currentChatKey) {
+    const fresh = await getChatSettings(currentChatKey);
+    if (fresh) {
+      currentChatSettings = fresh;
+      renderChip();
+      rescanVisibleMessages();
+      console.info('[zalo-bridge] active chat settings refreshed from server');
+    }
+  }
 }
 
 async function syncToServer(chatKey: string, settings: ChatSettings): Promise<void> {
