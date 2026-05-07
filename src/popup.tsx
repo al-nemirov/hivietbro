@@ -44,6 +44,7 @@ function Popup() {
   const [cacheCount, setCacheCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [signingIn, setSigningIn] = useState(false);
+  const [justSignedIn, setJustSignedIn] = useState(false);
 
   const refresh = async (): Promise<void> => {
     const [u, e, stats] = await Promise.all([getUser(), isEnabled(), cacheStats()]);
@@ -97,8 +98,53 @@ function Popup() {
         return;
       }
       await refresh();
+      setJustSignedIn(true);
+      // Активные вкладки chat.zalo.me — перезагрузить, чтобы content script
+      // увидел свежий JWT. Без reload юзер не понимает «почему не работает».
+      try {
+        const tabs = await chrome.tabs.query({ url: 'https://chat.zalo.me/*' });
+        for (const t of tabs) {
+          if (t.id) chrome.tabs.reload(t.id);
+        }
+      } catch {
+        // нет permission tabs или другая ошибка — не критично
+      }
     } finally {
       setSigningIn(false);
+    }
+  };
+
+  const onShowTour = async (): Promise<void> => {
+    // Сбросить onboard-flag чтобы при следующем открытии чата tour показался
+    try {
+      await chrome.storage.local.remove('zb_onboard_seen');
+    } catch {}
+    // Открыть chat.zalo.me в новой вкладке (или сфокусировать существующую)
+    try {
+      const tabs = await chrome.tabs.query({ url: 'https://chat.zalo.me/*' });
+      if (tabs.length > 0 && tabs[0].id) {
+        chrome.tabs.update(tabs[0].id, { active: true });
+        if (tabs[0].windowId) chrome.windows.update(tabs[0].windowId, { focused: true });
+        chrome.tabs.reload(tabs[0].id);
+      } else {
+        chrome.tabs.create({ url: 'https://chat.zalo.me/' });
+      }
+    } catch {
+      chrome.tabs.create({ url: 'https://chat.zalo.me/' });
+    }
+  };
+
+  const onOpenZalo = async (): Promise<void> => {
+    try {
+      const tabs = await chrome.tabs.query({ url: 'https://chat.zalo.me/*' });
+      if (tabs.length > 0 && tabs[0].id) {
+        chrome.tabs.update(tabs[0].id, { active: true });
+        if (tabs[0].windowId) chrome.windows.update(tabs[0].windowId, { focused: true });
+      } else {
+        chrome.tabs.create({ url: 'https://chat.zalo.me/' });
+      }
+    } catch {
+      chrome.tabs.create({ url: 'https://chat.zalo.me/' });
     }
   };
 
@@ -161,9 +207,13 @@ function Popup() {
           planLabel={planLabel}
           planAccent={planAccent}
           initials={initials}
+          justSignedIn={justSignedIn}
           onToggle={onToggle}
           onLogout={onLogout}
           onClearCache={onClearCache}
+          onShowTour={onShowTour}
+          onOpenZalo={onOpenZalo}
+          onDismissJustSignedIn={() => setJustSignedIn(false)}
         />
       )}
 
@@ -182,13 +232,29 @@ function MainTab(props: {
   planLabel: string;
   planAccent: string;
   initials: string;
+  justSignedIn: boolean;
   onToggle: () => void;
   onLogout: () => void;
   onClearCache: () => void;
+  onShowTour: () => void;
+  onOpenZalo: () => void;
+  onDismissJustSignedIn: () => void;
 }) {
-  const { user, enabled, usage, cacheCount, planLabel, planAccent, initials, onToggle, onLogout, onClearCache } = props;
+  const {
+    user, enabled, usage, cacheCount, planLabel, planAccent, initials, justSignedIn,
+    onToggle, onLogout, onClearCache, onShowTour, onOpenZalo, onDismissJustSignedIn,
+  } = props;
   return (
     <>
+      {justSignedIn && (
+        <div style={{ marginTop: 12, padding: 14, background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 10, fontSize: 13, color: '#065f46', lineHeight: 1.5 }}>
+          ✓ Вход выполнен. Открытые вкладки <strong>chat.zalo.me</strong> перезагружены.
+          <div style={{ marginTop: 10, display: 'flex', gap: 6 }}>
+            <button onClick={onOpenZalo} style={{ ...btnTinyPrimary, flex: 1 }}>Открыть Zalo</button>
+            <button onClick={onDismissJustSignedIn} style={btnTiny}>Скрыть</button>
+          </div>
+        </div>
+      )}
       <div style={{ ...card, padding: 14, marginTop: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {user.picture_url ? (
@@ -236,6 +302,10 @@ function MainTab(props: {
       <div style={{ marginTop: 14, padding: 12, background: '#f0f7ff', borderRadius: 10, fontSize: 11.5, color: C.textMuted, lineHeight: 1.5 }}>
         Перевод включается <strong style={{ color: C.text }}>в каждом чате отдельно</strong> через плавающий чип. Можно перетаскивать.
       </div>
+
+      <button onClick={onShowTour} style={{ ...btnGhost, marginTop: 8 }}>
+        📖 Показать инструкцию заново
+      </button>
 
       {!user.is_admin && user.plan === 'free' && (
         <button

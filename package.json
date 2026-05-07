@@ -1,7 +1,7 @@
 {
   "name": "zalo-bridge-extension",
   "displayName": "HiVietBro — chat translation",
-  "version": "0.0.9",
+  "version": "0.0.11",
   "description": "Перевод чата Zalo в реальном времени через Claude AI. Вы пишете на родном языке — собеседник получает на вьетнамском (или одном из шести поддерживаемых языков). И наоборот.",
   "author": "Alexander Nemirov",
   "license": "AGPL-3.0-or-later",
@@ -36,7 +36,8 @@
     "permissions": [
       "storage",
       "activeTab",
-      "identity"
+      "identity",
+      "tabs"
     ]
   }
 }
