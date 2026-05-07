@@ -512,10 +512,16 @@ function extractContactIdFromQid(qid: string): string | null {
   return m ? m[1] : null;
 }
 
+// Cache: trailer (имя контакта) → последний известный качественный chat key.
+// Когда qid видим — учим связь. Когда qid временно пропадает (скролл),
+// возвращаем закэшированный ключ, чтобы chat key не «прыгал» c:↔t:.
+const trailerToChatKey = new Map<string, string>();
+
 /**
  * Находит стабильный chat key:
- *   - data-qid префикс ANY видимого баббла (стабильный contactId Zalo)
- *   - fallback: data-trailer (имя контакта; для пустых чатов)
+ *   - data-qid префикс ANY видимого баббла (стабильный contactId Zalo) — учим cache
+ *   - fallback: cached `c:contactId` для известного trailer'а
+ *   - fallback: `t:trailer` (только если ни разу не видели qid этого чата)
  */
 function findChatKey(): { key: string | null; displayName: string | null } {
   const input = document.querySelector(SEL.inputField) as HTMLElement | null;
@@ -526,17 +532,26 @@ function findChatKey(): { key: string | null; displayName: string | null } {
   const qid = anyQidEl?.getAttribute('data-qid');
   const contactId = qid ? extractContactIdFromQid(qid) : null;
 
-  if (contactId) return { key: `c:${contactId}`, displayName: trailer };
-  if (trailer) return { key: `t:${trailer}`, displayName: trailer };
+  if (contactId) {
+    const key = `c:${contactId}`;
+    if (trailer) trailerToChatKey.set(trailer, key); // запоминаем
+    return { key, displayName: trailer };
+  }
+  // qid отсутствует — пробуем закэшированный c:
+  if (trailer) {
+    const cached = trailerToChatKey.get(trailer);
+    if (cached) return { key: cached, displayName: trailer };
+    return { key: `t:${trailer}`, displayName: trailer };
+  }
   return { key: null, displayName: null };
 }
 
 async function loadCurrentChatSettings(): Promise<void> {
   const { key, displayName } = findChatKey();
   if (!key) {
-    currentChatKey = null;
-    currentChatDisplayName = null;
-    currentChatSettings = null;
+    // НЕ обнуляем существующее состояние — это может быть transient
+    // (Zalo во время re-render'а убирает все qid). Если чат реально
+    // закрыт, tick детектит это через 3 null-msgRoot подряд.
     return;
   }
   if (key === currentChatKey && currentChatSettings) return;
@@ -1419,7 +1434,10 @@ function watchUI(): void {
     nullRootCount = 0;
 
     const { key } = findChatKey();
-    if (key !== lastChatKey) {
+    // Перезагружаем настройки ТОЛЬКО при non-null key и реальной смене чата.
+    // Transient null key (qid temporarily gone during scroll) — игнорируем,
+    // currentChatSettings остаётся прежним.
+    if (key && key !== lastChatKey) {
       lastChatKey = key;
       await loadCurrentChatSettings();
     }
