@@ -515,10 +515,30 @@ function extractText(bubble: Element): string {
   return (t?.textContent ?? '').trim();
 }
 
-/** Извлекает стабильный contactId из qid. Формат: <id>@<msgId>... или <id>_xxx@... */
+/**
+ * Извлекает стабильный CONVERSATION ID (chat ID) из data-qid Zalo.
+ *
+ * Формат qid:
+ *   - Incoming: <senderUserId>@<msgId>_..._<conversationId>
+ *     Пример: 7752889248894@1776861963348_2619989090629755737_261998909062
+ *   - Outgoing: <senderUserId>_<seq>@<msgId>_..._<conversationId>
+ *     Пример: 7752910850851_000@1776862552816_0_2619989090629755737
+ *
+ * Важно: <senderUserId> МЕНЯЕТСЯ внутри одного чата (разные авторы — разные ID).
+ * <conversationId> стабилен для всего чата.
+ *
+ * Эвристика: <conversationId> — самый длинный числовой сегмент (~19 цифр),
+ * <senderUserId> ~13 цифр, msgId ~13 цифр.
+ */
 function extractContactIdFromQid(qid: string): string | null {
-  const m = qid.match(/^(\d+)/);
-  return m ? m[1] : null;
+  const matches = qid.match(/\d+/g);
+  if (!matches || matches.length === 0) return null;
+  let longest = '';
+  for (const m of matches) {
+    if (m.length > longest.length) longest = m;
+  }
+  // conversation ID — обычно 19 цифр; >= 15 чтобы не путать с userId (13) и msgId (13)
+  return longest.length >= 15 ? longest : null;
 }
 
 // Cache: trailer (имя контакта) → последний известный качественный chat key.
