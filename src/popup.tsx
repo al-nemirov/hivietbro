@@ -10,6 +10,10 @@ import {
   type GlossaryEntry,
 } from './lib/glossary-client';
 
+// Версия пробрасывается через PLASMO_PUBLIC_EXTENSION_VERSION,
+// автоматически бампается scripts/rebuild.mjs.
+const EXTENSION_VERSION = process.env.PLASMO_PUBLIC_EXTENSION_VERSION ?? 'dev';
+
 interface Usage {
   messages: number;
   chars: number;
@@ -118,13 +122,13 @@ function Popup() {
         </div>
         <div style={{ ...card, padding: 18, marginTop: 16 }}>
           <p style={{ margin: '0 0 14px', color: C.textMuted, fontSize: 13, lineHeight: 1.5 }}>
-            Войди через Google, чтобы расширение могло переводить твои входящие и исходящие сообщения через Claude.
+            Войдите через Google, чтобы расширение могло переводить Ваши входящие и исходящие сообщения через Claude AI.
           </p>
           <button onClick={onLogin} style={btnPrimary} disabled={signingIn}>
             {signingIn ? 'Открываю Google…' : 'Войти через Google'}
           </button>
         </div>
-        <div style={{ ...footer, marginTop: 12 }}>v0.0.1 · build dev</div>
+        <div style={{ ...footer, marginTop: 12 }}>v{EXTENSION_VERSION}</div>
       </div>
     );
   }
@@ -165,7 +169,7 @@ function Popup() {
 
       {tab === 'glossary' && <GlossaryTab />}
 
-      <div style={footer}>v0.0.1 · {user.is_admin ? 'admin' : user.plan}</div>
+      <div style={footer}>v{EXTENSION_VERSION} · {user.is_admin ? 'admin' : user.plan}</div>
     </div>
   );
 }
