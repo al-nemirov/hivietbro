@@ -605,8 +605,12 @@ async function loadCurrentChatSettings(): Promise<void> {
 
 async function processBubble(bubble: Element): Promise<void> {
   if (!isContextValid()) return;
-  if (isOutgoing(bubble)) return;
   if (!currentChatSettings || !currentChatSettings.enabled) return;
+  // Outgoing — НЕ скипаем. Юзер пишет на родном, мы шлём на VI, в баббле
+  // VI текст. Полезно видеть свой VI как RU перевод чтобы убедиться что
+  // отправилось правильно. processBubble прогонит через тот же detectLang
+  // → если detected === preferred_lang (юзер написал на родном и не
+  // переводили) — overlay не рисуется.
 
   const qid = getBubbleStableId(bubble);
   if (!qid) return;
