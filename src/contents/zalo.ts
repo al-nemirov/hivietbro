@@ -558,12 +558,12 @@ function findChatKey(): { key: string | null; displayName: string | null } {
 async function loadCurrentChatSettings(): Promise<void> {
   const { key, displayName } = findChatKey();
   if (!key) {
-    // НЕ обнуляем существующее состояние — это может быть transient
-    // (Zalo во время re-render'а убирает все qid). Если чат реально
-    // закрыт, tick детектит это через 3 null-msgRoot подряд.
     return;
   }
   if (key === currentChatKey && currentChatSettings) return;
+
+  const prevKey = currentChatKey;
+  const prevEnabled = currentChatSettings?.enabled;
 
   currentChatKey = key;
   currentChatDisplayName = displayName ?? key;
@@ -575,6 +575,12 @@ async function loadCurrentChatSettings(): Promise<void> {
   }
 
   currentChatSettings = await getOrInitChatSettings(key, displayName ?? undefined);
+
+  // Debug: логируем transition'ы chat-key — без этого невозможно понять
+  // почему чип переключается. Нужно для production-debug. Уберём после стабильности.
+  console.info(
+    `[zalo-bridge] chat: ${prevKey ?? 'none'} (${prevEnabled === undefined ? '?' : prevEnabled ? 'ON' : 'OFF'}) → ${key} (${currentChatSettings.enabled ? 'ON' : 'OFF'}) trailer=${displayName}`
+  );
 }
 
 async function processBubble(bubble: Element): Promise<void> {
@@ -799,6 +805,12 @@ function renderChip(): void {
   if (!currentChatKey || !s) {
     chip.style.display = 'none';
     return;
+  }
+  // Debug: ловим момент перехода ON → OFF (если вообще будет такая транзиция)
+  const wasOn = chip.classList.contains(`${CHIP_CLASS}--on`);
+  const willBeOn = !!s.enabled;
+  if (wasOn && !willBeOn) {
+    console.warn(`[zalo-bridge] chip ON → OFF for ${currentChatKey}`, new Error('stack').stack);
   }
   chip.style.display = '';
   chip.classList.toggle(`${CHIP_CLASS}--on`, !!s.enabled);
