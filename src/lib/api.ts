@@ -65,6 +65,13 @@ export async function getUsage(): Promise<{ today: { messages: number; chars: nu
   return r.json();
 }
 
+export async function getCheckoutUrl(): Promise<string> {
+  const r = await authedFetch('/billing/checkout');
+  if (!r.ok) throw new Error(`checkout ${r.status}`);
+  const data = (await r.json()) as { url: string };
+  return data.url;
+}
+
 export async function exchangeGoogleCode(code: string, redirect_uri: string): Promise<{ token: string; user: any }> {
   const r = await fetch(`${API_BASE}/auth/google`, {
     method: 'POST',

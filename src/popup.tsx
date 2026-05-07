@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import logoUrl from 'data-base64:~assets/icon.png';
 import { getUser, isEnabled, setEnabled, clearAuth, type StoredUser } from './lib/storage';
-import { getUsage } from './lib/api';
+import { getUsage, getCheckoutUrl } from './lib/api';
 import { cacheClear, cacheStats } from './lib/cache-client';
 import {
   listGlossary,
@@ -232,6 +232,22 @@ function MainTab(props: {
       <div style={{ marginTop: 14, padding: 12, background: '#f0f7ff', borderRadius: 10, fontSize: 11.5, color: C.textMuted, lineHeight: 1.5 }}>
         Перевод включается <strong style={{ color: C.text }}>в каждом чате отдельно</strong> через плавающий чип. Можно перетаскивать.
       </div>
+
+      {!user.is_admin && user.plan === 'free' && (
+        <button
+          onClick={async () => {
+            try {
+              const url = await getCheckoutUrl();
+              chrome.tabs.create({ url });
+            } catch (e) {
+              alert(`Не удалось открыть оплату: ${(e as Error).message}`);
+            }
+          }}
+          style={btnUpgrade}
+        >
+          ⚡ Upgrade to Pro
+        </button>
+      )}
 
       <button onClick={onLogout} style={btnGhost}>Выйти</button>
     </>
@@ -544,6 +560,20 @@ const btnGhost: React.CSSProperties = {
   cursor: 'pointer',
   fontSize: 13,
   fontWeight: 500,
+};
+
+const btnUpgrade: React.CSSProperties = {
+  width: '100%',
+  padding: '11px 14px',
+  marginTop: 14,
+  background: `linear-gradient(135deg, ${C.accent}, ${C.accentDark})`,
+  color: '#fff',
+  border: 0,
+  borderRadius: 10,
+  cursor: 'pointer',
+  fontSize: 14,
+  fontWeight: 600,
+  boxShadow: '0 4px 12px rgba(64, 130, 255, 0.35)',
 };
 
 const btnTiny: React.CSSProperties = {
