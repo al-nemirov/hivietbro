@@ -2,6 +2,9 @@ node_modules/
 build/
 .plasmo/
 
+# Trash folders созданные npm run rebuild при перемещении залоченных кэшей
+*.trash-*
+
 # Plasmo build outputs
 build/chrome-mv3-prod/
 build/chrome-mv3-dev/
