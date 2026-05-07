@@ -556,11 +556,20 @@ async function loadCurrentChatSettings(): Promise<void> {
 async function processBubble(bubble: Element): Promise<void> {
   if (!isContextValid()) return;
   if (isOutgoing(bubble)) return;
-  if (bubble.querySelector(`[${OVERLAY_DATA_ATTR}]`)) return;
   if (!currentChatSettings || !currentChatSettings.enabled) return;
 
   const qid = getBubbleStableId(bubble);
   if (!qid) return;
+
+  // Smart dedup: ReactVirtualized переиспользует DOM-узлы при скролле истории.
+  // Один и тот же bubble может содержать разные сообщения в разное время.
+  // Сравниваем qid — если не совпадает, удаляем старый overlay и обрабатываем заново.
+  const existingOverlay = bubble.querySelector(`[${OVERLAY_DATA_ATTR}]`);
+  if (existingOverlay) {
+    const existingQid = existingOverlay.getAttribute(OVERLAY_DATA_ATTR);
+    if (existingQid === qid) return; // тот же баббл с тем же qid — уже обработан
+    existingOverlay.remove(); // переиспользован под другой qid — снести стейл
+  }
 
   const text = extractText(bubble);
   if (!text) return;
@@ -1378,26 +1387,36 @@ function showPreviewAndAwaitConfirm(srcText: string, tgtText: string): Promise<b
 function watchUI(): void {
   let pendingTick: number | null = null;
   let lastChatKey: string | null = null;
+  let nullRootCount = 0;
+  let lastScrollRescan = 0;
 
   const tick = async (): Promise<void> => {
     pendingTick = null;
     const msgRoot = document.querySelector(SEL.messageContainer);
 
     if (!msgRoot) {
-      if (attachedMsgRoot) {
-        attachedMsgRoot = null;
-        if (msgObserver) {
-          msgObserver.disconnect();
-          msgObserver = null;
+      // НЕ обнуляем currentChatSettings сразу — Zalo может временно убрать
+      // контейнер при ре-рендере (скролл, смена баббла). Сбрасываем только
+      // если 3+ tick'ов подряд видят пустоту (≈600мс) — это уже точно «чат закрыт».
+      nullRootCount++;
+      if (nullRootCount >= 3) {
+        if (attachedMsgRoot) {
+          attachedMsgRoot = null;
+          if (msgObserver) {
+            msgObserver.disconnect();
+            msgObserver = null;
+          }
         }
+        currentChatKey = null;
+        currentChatDisplayName = null;
+        currentChatSettings = null;
+        lastChatKey = null;
+        nullRootCount = 0;
+        renderChip();
       }
-      currentChatKey = null;
-      currentChatDisplayName = null;
-      currentChatSettings = null;
-      lastChatKey = null;
-      renderChip();
       return;
     }
+    nullRootCount = 0;
 
     const { key } = findChatKey();
     if (key !== lastChatKey) {
@@ -1405,7 +1424,18 @@ function watchUI(): void {
       await loadCurrentChatSettings();
     }
 
-    if (msgRoot !== attachedMsgRoot) attachMessageObserver(msgRoot);
+    if (msgRoot !== attachedMsgRoot) {
+      attachMessageObserver(msgRoot);
+      // Подключаем scroll listener — при скролле истории Zalo подгружает старые
+      // сообщения; мы делаем дебаунсенный rescan чтобы старые баблы тоже
+      // получили overlay.
+      msgRoot.addEventListener('scroll', () => {
+        const now = Date.now();
+        if (now - lastScrollRescan < 350) return; // дебаунс
+        lastScrollRescan = now;
+        if (currentChatSettings?.enabled) rescanVisibleMessages();
+      });
+    }
     renderChip();
   };
 
@@ -1422,6 +1452,14 @@ function watchUI(): void {
 
   bodyObserver = new MutationObserver(schedule);
   bodyObserver.observe(document.body, { childList: true, subtree: true });
+
+  // Safety net: каждые 8 сек принудительный rescan видимых сообщений если
+  // активный чат включён. Ловит граничные случаи когда MutationObserver
+  // пропустил событие (history pagination Zalo иногда обходит childList API).
+  setInterval(() => {
+    if (!isContextValid()) return;
+    if (currentChatSettings?.enabled) rescanVisibleMessages();
+  }, 8000);
 }
 
 // ===== SERVER SYNC ==========================================================
