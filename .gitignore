@@ -31,3 +31,8 @@ yarn-error.log*
 *.swp
 *.swo
 *~
+
+# Production signing key — НИКОГДА не коммитим
+extension-key.pem
+extension-public-key.txt
+*.pem
