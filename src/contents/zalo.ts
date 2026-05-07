@@ -1411,7 +1411,6 @@ function showPreviewAndAwaitConfirm(srcText: string, tgtText: string): Promise<b
 function watchUI(): void {
   let pendingTick: number | null = null;
   let lastChatKey: string | null = null;
-  let nullRootCount = 0;
   let lastScrollRescan = 0;
 
   const tick = async (): Promise<void> => {
@@ -1419,28 +1418,13 @@ function watchUI(): void {
     const msgRoot = document.querySelector(SEL.messageContainer);
 
     if (!msgRoot) {
-      // НЕ обнуляем currentChatSettings сразу — Zalo может временно убрать
-      // контейнер при ре-рендере (скролл, смена баббла). Сбрасываем только
-      // если 3+ tick'ов подряд видят пустоту (≈600мс) — это уже точно «чат закрыт».
-      nullRootCount++;
-      if (nullRootCount >= 3) {
-        if (attachedMsgRoot) {
-          attachedMsgRoot = null;
-          if (msgObserver) {
-            msgObserver.disconnect();
-            msgObserver = null;
-          }
-        }
-        currentChatKey = null;
-        currentChatDisplayName = null;
-        currentChatSettings = null;
-        lastChatKey = null;
-        nullRootCount = 0;
-        renderChip();
-      }
+      // НЕ ТРОГАЕМ currentChatSettings вообще никогда. Это transient state,
+      // Zalo может убрать контейнер на любое время при скролле истории /
+      // смене баблов. Просто скрываем chip — рендер решит сам что показать.
+      const chip = document.querySelector(`.${CHIP_CLASS}`) as HTMLElement | null;
+      if (chip) chip.style.display = 'none';
       return;
     }
-    nullRootCount = 0;
 
     const { key } = findChatKey();
     // Перезагружаем настройки ТОЛЬКО при non-null key и реальной смене чата.
