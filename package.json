@@ -1,7 +1,7 @@
 {
   "name": "zalo-bridge-extension",
   "displayName": "HiVietBro — chat translation",
-  "version": "0.0.1",
+  "version": "0.0.4",
   "description": "Перевод чата Zalo в реальном времени через Claude AI. Вы пишете на родном языке — собеседник получает на вьетнамском (или одном из шести поддерживаемых языков). И наоборот.",
   "author": "Alexander Nemirov",
   "license": "AGPL-3.0-or-later",
@@ -9,7 +9,8 @@
     "dev": "plasmo dev",
     "build": "plasmo build",
     "build:firefox": "plasmo build --target=firefox-mv2",
-    "package": "plasmo package"
+    "package": "plasmo package",
+    "rebuild": "node scripts/rebuild.mjs"
   },
   "dependencies": {
     "@plasmohq/storage": "^1.13.0",

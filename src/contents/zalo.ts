@@ -130,9 +130,7 @@ async function bootstrap(): Promise<void> {
   attachOutgoingInterceptors();
 
   // Сначала синхронизация с сервером (await) — чтобы настройки активного
-  // чата уже были в chrome.storage до первого render'а чипа. Без этого
-  // чип может мелькнуть в дефолтном OFF до того как sync подтянет ON.
-  // Таймаут 3с чтобы не блокировать UI если сервер тормозит.
+  // чата уже были в chrome.storage до первого render'а чипа.
   try {
     await Promise.race([
       syncFromServer(),
@@ -143,8 +141,19 @@ async function bootstrap(): Promise<void> {
   }
 
   watchUI();
-  console.info('[zalo-bridge] active');
+  // VERSION выводим в console.info чтобы юзер сразу видел в DevTools какая
+  // версия загружена — это спасает от 'Chrome закэшировал старый bundle'
+  // ситуаций. Версия бампается автоматически в scripts/rebuild.mjs.
+  console.info(`[zalo-bridge] active v${EXTENSION_VERSION}`);
 }
+
+// Версия из package.json — Plasmo пробрасывает в process.env через манифест.
+// Bumpается автоматически в scripts/rebuild.mjs на каждом чистом ребилде.
+declare const PLASMO_PUBLIC_EXTENSION_VERSION: string | undefined;
+const EXTENSION_VERSION =
+  (typeof PLASMO_PUBLIC_EXTENSION_VERSION !== 'undefined' && PLASMO_PUBLIC_EXTENSION_VERSION) ||
+  process.env.PLASMO_PUBLIC_EXTENSION_VERSION ||
+  'dev';
 
 // ===== LANGUAGE DETECTION ===================================================
 

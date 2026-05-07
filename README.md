@@ -65,11 +65,29 @@ extension/
 
 ## Сборка
 
+**Для разработки и production используйте `npm run rebuild`** — единственный надёжный способ. Plasmo HMR-watcher (`npm run dev`) на Windows иногда залочивает кэш и обычный `plasmo build` отдаёт стейл-бандл с пропущенными правками.
+
 ```bash
-npm run dev            # Chrome MV3 с HMR
-npm run build          # Chrome MV3 production
+npm run rebuild        # ⭐ рекомендуется: clean rebuild + canary checks + version bump
+npm run dev            # Chrome MV3 с HMR (нестабильно на Windows)
+npm run build          # Chrome MV3 production (без canary)
 npm run build:firefox  # Firefox MV2
 ```
+
+`npm run rebuild` (`scripts/rebuild.mjs`):
+
+1. Перемещает `.plasmo`, `.parcel-cache`, `build/` в `*.trash-<ts>/` (даже если залочены).
+2. Бампает patch-версию в `package.json` и пробрасывает в `PLASMO_PUBLIC_EXTENSION_VERSION`.
+3. Запускает `plasmo build` → `build/chrome-mv3-prod/`.
+4. Копирует prod → dev (extension ID не меняется).
+5. **Regression canary**: проверяет что 12 critical-фиксов попали в бандл (scroll listener, smart dedup, i18n keys, sync endpoint, и т.д.).
+6. Печатает hash, размер, версию + что делать дальше.
+
+При каждой загрузке расширения в DevTools Console на `chat.zalo.me` ты видишь:
+```
+[zalo-bridge] active v0.0.X
+```
+Если версия не та — Chrome закэшировал, нужно повторно «Load unpacked».
 
 ## Конфигурация
 

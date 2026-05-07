@@ -1,0 +1,51 @@
+{
+  "icons": {
+    "16": "./gen-assets/icon16.plasmo.png",
+    "32": "./gen-assets/icon32.plasmo.png",
+    "48": "./gen-assets/icon48.plasmo.png",
+    "64": "./gen-assets/icon64.plasmo.png",
+    "128": "./gen-assets/icon128.plasmo.png"
+  },
+  "manifest_version": 3,
+  "action": {
+    "default_icon": {
+      "16": "./gen-assets/icon16.plasmo.png",
+      "32": "./gen-assets/icon32.plasmo.png",
+      "48": "./gen-assets/icon48.plasmo.png",
+      "64": "./gen-assets/icon64.plasmo.png",
+      "128": "./gen-assets/icon128.plasmo.png"
+    },
+    "default_popup": "./popup.html"
+  },
+  "version": "0.0.3",
+  "author": "Alexander Nemirov",
+  "name": "HiVietBro — chat translation",
+  "description": "Перевод чата Zalo в реальном времени через Claude AI. Вы пишете на родном языке — собеседник получает на вьетнамском (или одном из шести поддерживаемых языков). И наоборот.",
+  "background": {
+    "service_worker": "./static/background/index.ts"
+  },
+  "permissions": [
+    "storage",
+    "activeTab",
+    "identity"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chat.zalo.me/*"
+      ],
+      "js": [
+        "..\\src\\contents\\zalo.ts"
+      ],
+      "all_frames": false,
+      "run_at": "document_idle"
+    }
+  ],
+  "host_permissions": [
+    "https://chat.zalo.me/*",
+    "https://*.zalo.me/*",
+    "https://accounts.google.com/*",
+    "https://oauth2.googleapis.com/*",
+    "https://zalo-bridge-api.aleuphoria.workers.dev/*"
+  ]
+}
