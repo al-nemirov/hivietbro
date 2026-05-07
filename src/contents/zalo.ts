@@ -760,12 +760,13 @@ function renderChip(): void {
   chip.classList.toggle(`${CHIP_CLASS}--on`, !!s.enabled);
   chip.classList.toggle(`${CHIP_CLASS}--off`, !s.enabled);
 
+  const t = I18N[getUiLang()];
   const partnerInfo = SUPPORTED_PARTNER_LANGS.find((l) => l.code === s.partner_lang);
   const partnerTag = partnerInfo?.flag ?? s.partner_lang.toUpperCase();
   const myInfo = SUPPORTED_PREFERRED_LANGS.find((l) => l.code === s.preferred_lang);
   const myTag = (myInfo as { code: string; flag?: string })?.flag ?? s.preferred_lang.toUpperCase();
   const langTag = `${partnerTag} ↔ ${myTag}`;
-  const stateText = s.enabled ? 'перевод вкл' : 'перевод выкл';
+  const stateText = s.enabled ? t.chipStateOn : t.chipStateOff;
 
   if (!chip.querySelector(`.${CHIP_CLASS}__btn`)) {
     chip.innerHTML = `
@@ -831,20 +832,21 @@ function toggleChipMenu(chip: HTMLElement): void {
   `
   ).join('');
 
+  const t = I18N[getUiLang()];
   menu.innerHTML = `
     <div class="${CHIP_CLASS}__chat-name">${escapeHtml(currentChatDisplayName ?? currentChatKey ?? '')}</div>
     <div class="${CHIP_CLASS}__row" data-action="toggle">
-      <strong>Перевод включён</strong>
+      <strong>${escapeHtml(t.chipToggleLabel)}</strong>
       <button class="${CHIP_CLASS}__switch" type="button" data-on="${s.enabled ? '1' : '0'}"></button>
     </div>
     <div class="${CHIP_CLASS}__divider"></div>
-    <div class="${CHIP_CLASS}__menu-header">Я говорю на</div>
+    <div class="${CHIP_CLASS}__menu-header">${escapeHtml(t.chipMyLang)}</div>
     <div class="${CHIP_CLASS}__lang-grid">${myOptions}</div>
     <div class="${CHIP_CLASS}__divider"></div>
-    <div class="${CHIP_CLASS}__menu-header">Партнёр говорит на</div>
+    <div class="${CHIP_CLASS}__menu-header">${escapeHtml(t.chipPartnerLang)}</div>
     <div class="${CHIP_CLASS}__lang-grid">${partnerOptions}</div>
     <div class="${CHIP_CLASS}__divider"></div>
-    <div class="${CHIP_CLASS}__hint">Перетащите иконку, чтобы переместить. Клик по переводу — показать оригинал.</div>
+    <div class="${CHIP_CLASS}__hint">${escapeHtml(t.chipHint)}</div>
   `;
 
   chip.appendChild(menu);
@@ -912,6 +914,7 @@ function escapeHtml(s: string): string {
 // Локализованные сообщения интерфейса. Язык определяется по navigator.language;
 // fallback на ru.
 interface I18nMsg {
+  // Onboarding
   onboardTitle: string;
   onboardSubtitle: string;
   step1: string;
@@ -922,6 +925,27 @@ interface I18nMsg {
   startBtn: string;
   arrowHint: string;
   close: string;
+  // Chip + popover
+  chipMyLang: string;
+  chipPartnerLang: string;
+  chipToggleLabel: string;
+  chipHint: string;
+  chipStateOn: string;
+  chipStateOff: string;
+  // Status
+  statusTranslating: string;
+  statusSent: string;
+  statusCancelled: string;
+  statusErrorPrefix: string;
+  // Preview
+  previewLabel: string;
+  previewHint: string;
+  previewBtnCancel: string;
+  previewBtnSend: string;
+  // Errors
+  errEmptyTranslation: string;
+  errSendBtnNotFound: string;
+  errPrefix: string;
 }
 
 const I18N: Record<string, I18nMsg> = {
@@ -936,6 +960,23 @@ const I18N: Record<string, I18nMsg> = {
     startBtn: 'Начать',
     arrowHint: 'Кнопка здесь →',
     close: 'понятно',
+    chipMyLang: 'Я говорю на',
+    chipPartnerLang: 'Партнёр говорит на',
+    chipToggleLabel: 'Перевод включён',
+    chipHint: 'Перетащите иконку, чтобы переместить. Клик по переводу — показать оригинал.',
+    chipStateOn: 'перевод вкл',
+    chipStateOff: 'перевод выкл',
+    statusTranslating: 'Перевожу…',
+    statusSent: 'Отправлено',
+    statusCancelled: 'Отменено',
+    statusErrorPrefix: 'Ошибка',
+    previewLabel: 'Будет отправлено',
+    previewHint: 'Esc — отменить · Enter — отправить',
+    previewBtnCancel: 'Отменить',
+    previewBtnSend: 'Отправить',
+    errEmptyTranslation: 'пустой перевод',
+    errSendBtnNotFound: 'кнопка отправки не найдена',
+    errPrefix: 'ошибка',
   },
   en: {
     onboardTitle: 'Welcome to HiVietBro',
@@ -948,6 +989,23 @@ const I18N: Record<string, I18nMsg> = {
     startBtn: 'Start',
     arrowHint: 'Button is here →',
     close: 'got it',
+    chipMyLang: 'I speak',
+    chipPartnerLang: 'Partner speaks',
+    chipToggleLabel: 'Translation enabled',
+    chipHint: 'Drag the icon to reposition. Click any translation to toggle the original.',
+    chipStateOn: 'translation on',
+    chipStateOff: 'translation off',
+    statusTranslating: 'Translating…',
+    statusSent: 'Sent',
+    statusCancelled: 'Cancelled',
+    statusErrorPrefix: 'Error',
+    previewLabel: 'Will be sent',
+    previewHint: 'Esc — cancel · Enter — send',
+    previewBtnCancel: 'Cancel',
+    previewBtnSend: 'Send',
+    errEmptyTranslation: 'empty translation',
+    errSendBtnNotFound: 'send button not found',
+    errPrefix: 'error',
   },
   ko: {
     onboardTitle: 'HiVietBro에 오신 것을 환영합니다',
@@ -960,6 +1018,23 @@ const I18N: Record<string, I18nMsg> = {
     startBtn: '시작',
     arrowHint: '버튼이 여기 →',
     close: '확인',
+    chipMyLang: '내가 사용하는 언어',
+    chipPartnerLang: '상대방 사용 언어',
+    chipToggleLabel: '번역 활성화',
+    chipHint: '아이콘을 드래그해 이동할 수 있습니다. 번역을 클릭하면 원문이 표시됩니다.',
+    chipStateOn: '번역 ON',
+    chipStateOff: '번역 OFF',
+    statusTranslating: '번역 중…',
+    statusSent: '전송됨',
+    statusCancelled: '취소됨',
+    statusErrorPrefix: '오류',
+    previewLabel: '전송될 내용',
+    previewHint: 'Esc — 취소 · Enter — 전송',
+    previewBtnCancel: '취소',
+    previewBtnSend: '전송',
+    errEmptyTranslation: '빈 번역',
+    errSendBtnNotFound: '전송 버튼을 찾을 수 없음',
+    errPrefix: '오류',
   },
   vi: {
     onboardTitle: 'Chào mừng đến với HiVietBro',
@@ -972,6 +1047,23 @@ const I18N: Record<string, I18nMsg> = {
     startBtn: 'Bắt đầu',
     arrowHint: 'Nút ở đây →',
     close: 'hiểu rồi',
+    chipMyLang: 'Tôi nói',
+    chipPartnerLang: 'Đối tác nói',
+    chipToggleLabel: 'Bật bản dịch',
+    chipHint: 'Kéo biểu tượng để di chuyển. Nhấn vào bản dịch để xem bản gốc.',
+    chipStateOn: 'dịch ON',
+    chipStateOff: 'dịch OFF',
+    statusTranslating: 'Đang dịch…',
+    statusSent: 'Đã gửi',
+    statusCancelled: 'Đã hủy',
+    statusErrorPrefix: 'Lỗi',
+    previewLabel: 'Sẽ gửi',
+    previewHint: 'Esc — hủy · Enter — gửi',
+    previewBtnCancel: 'Hủy',
+    previewBtnSend: 'Gửi',
+    errEmptyTranslation: 'bản dịch trống',
+    errSendBtnNotFound: 'không tìm thấy nút gửi',
+    errPrefix: 'lỗi',
   },
 };
 
@@ -1142,18 +1234,18 @@ async function interceptAndSend(input: HTMLElement, ruText: string): Promise<voi
   if (translationInFlight) return;
   if (!currentChatSettings) return;
 
+  const t = I18N[getUiLang()];
+
   // Если пользователь сам уже написал на языке партнёра — не переводим, отдаём Zalo как есть
   const detectedSrc = detectLang(ruText);
   if (detectedSrc === currentChatSettings.partner_lang) {
-    // Откатить наше preventDefault — нативный send уже не сработает,
-    // поэтому программно симулируем нажатие send-кнопки
     const sendBtn = document.querySelector(SEL.sendButton) as HTMLElement | null;
     if (sendBtn) sendBtn.click();
     return;
   }
 
   translationInFlight = true;
-  showStatus('Перевожу…');
+  showStatus(t.statusTranslating);
 
   try {
     const result = await apiTranslate({
@@ -1164,15 +1256,14 @@ async function interceptAndSend(input: HTMLElement, ruText: string): Promise<voi
       chat_id: currentChatKey ?? undefined,
     });
     const vi = result.translation;
-    if (!vi) throw new Error('пустой перевод');
+    if (!vi) throw new Error(t.errEmptyTranslation);
 
     hideStatus();
 
     // Показать preview, дать пользователю 1.8с на отмену через Esc
     const confirmed = await showPreviewAndAwaitConfirm(ruText, vi);
     if (!confirmed) {
-      // Пользователь отменил — оставляем оригинальный текст в инпуте
-      showStatus('Отменено', 'error');
+      showStatus(t.statusCancelled, 'error');
       setTimeout(hideStatus, 1500);
       return;
     }
@@ -1197,7 +1288,6 @@ async function interceptAndSend(input: HTMLElement, ruText: string): Promise<voi
     if (sendBtn) {
       sendBtn.click();
     } else {
-      // Fallback: если send-btn не появилась — дёрнем Enter-key dispatch
       console.warn('[zalo-bridge] send button not found after 600ms, falling back to Enter key');
       input.dispatchEvent(
         new KeyboardEvent('keydown', {
@@ -1211,11 +1301,11 @@ async function interceptAndSend(input: HTMLElement, ruText: string): Promise<voi
       );
     }
 
-    showStatus('Отправлено', 'success');
+    showStatus(t.statusSent, 'success');
     setTimeout(hideStatus, 1000);
   } catch (err) {
     console.error('[zalo-bridge] send failed:', err);
-    showStatus(`Ошибка: ${(err as Error).message}`, 'error');
+    showStatus(`${t.statusErrorPrefix}: ${(err as Error).message}`, 'error');
     setTimeout(hideStatus, 3500);
   } finally {
     translationInFlight = false;
@@ -1225,18 +1315,19 @@ async function interceptAndSend(input: HTMLElement, ruText: string): Promise<voi
 const PREVIEW_AUTO_CONFIRM_MS = 1800;
 
 function showPreviewAndAwaitConfirm(srcText: string, tgtText: string): Promise<boolean> {
+  const t = I18N[getUiLang()];
   return new Promise((resolve) => {
     document.querySelector(`.${PREVIEW_CLASS}`)?.remove();
     const panel = document.createElement('div');
     panel.className = PREVIEW_CLASS;
     panel.innerHTML = `
-      <div class="${PREVIEW_CLASS}__label">Будет отправлено</div>
+      <div class="${PREVIEW_CLASS}__label">${escapeHtml(t.previewLabel)}</div>
       <div class="${PREVIEW_CLASS}__text">${escapeHtml(tgtText)}</div>
       <div class="${PREVIEW_CLASS}__row">
-        <span class="${PREVIEW_CLASS}__hint">Esc — отменить · Enter — отправить сейчас</span>
+        <span class="${PREVIEW_CLASS}__hint">${escapeHtml(t.previewHint)}</span>
         <div>
-          <button class="${PREVIEW_CLASS}__btn" data-act="cancel">Отменить</button>
-          <button class="${PREVIEW_CLASS}__btn ${PREVIEW_CLASS}__btn--primary" data-act="send">Отправить</button>
+          <button class="${PREVIEW_CLASS}__btn" data-act="cancel">${escapeHtml(t.previewBtnCancel)}</button>
+          <button class="${PREVIEW_CLASS}__btn ${PREVIEW_CLASS}__btn--primary" data-act="send">${escapeHtml(t.previewBtnSend)}</button>
         </div>
       </div>
     `;
